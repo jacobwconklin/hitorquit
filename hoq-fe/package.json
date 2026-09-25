@@ -1,0 +1,14 @@
+{
+  "name": "hit-or-quit", "version": "0.1.0", "private": true,
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start", "web": "expo start --web", "android": "expo start --android", "ios": "expo start --ios",
+    "typecheck": "tsc --noEmit", "test": "tsc -p tsconfig.test.json && node --test .test-build/tests/*.test.js", "build:web": "expo export --platform web"
+  },
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "2.2.0", "expo-crypto": "~55.0.19",
+    "expo": "~55.0.31", "expo-font": "~55.0.8", "expo-status-bar": "~55.0.6",
+    "react": "19.2.0", "react-dom": "19.2.0", "react-native": "0.83.10", "react-native-web": "^0.21.0", "react-native-safe-area-context": "~5.6.2"
+  },
+  "devDependencies": { "@types/react": "~19.2.0", "@types/node": "^24.0.0", "typescript": "~5.9.2" }
+}

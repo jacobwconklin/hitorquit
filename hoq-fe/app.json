@@ -1,0 +1,11 @@
+{
+  "expo": {
+    "name": "Hit or Quit", "slug": "hit-or-quit", "version": "0.1.0",
+    "orientation": "default", "userInterfaceStyle": "dark",
+    "web": { "bundler": "metro", "name": "Hit or Quit", "themeColor": "#102724" },
+    "plugins": ["expo-font"],
+    "experiments": {
+      "baseUrl": "/hitorquit"
+    }
+  }
+}

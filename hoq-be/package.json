@@ -1,0 +1,11 @@
+{
+  "name": "hoq-backend", "version": "0.1.0", "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/hoq-be/src/server.js",
+    "dev": "npm run build && npm start",
+    "test": "npm run build && node --test dist/hoq-be/tests/*.test.js"
+  },
+  "dependencies": { "ws": "^8.18.3" },
+  "devDependencies": { "@types/node": "^24.0.0", "@types/ws": "^8.18.1", "typescript": "~5.9.2" }
+}

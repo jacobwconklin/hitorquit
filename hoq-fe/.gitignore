@@ -1,0 +1,8 @@
+node_modules/
+.expo/
+dist/
+.pnpm-store/
+test-artifacts/
+.test-build/
+.native-check/
+*.log
