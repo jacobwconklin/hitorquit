@@ -3,11 +3,14 @@ import type { BotPolicy } from '../game/bots';
 import { shuffle } from '../game/standardRules';
 import type { Card, Command, Config, GameEvent, Rules, Seat } from '../game/types';
 import type { GameSession, Scheduler, Snapshot } from './types';
+import { createFunLocalSession } from './funLocalSession';
+import type { GameCard } from '../game/types';
 
 const realScheduler: Scheduler = { now: Date.now, schedule: (fn, ms) => { const id = setTimeout(fn, ms); return () => clearTimeout(id); } };
 export function createLocalSession<C extends Card>(options: {
   seats: Seat[]; config: Config; rules: Rules<C>; bot: BotPolicy<C>; random?: () => number; scheduler?: Scheduler;
 }): GameSession<C> {
+  if (options.rules.apply) return createFunLocalSession(options as unknown as Parameters<typeof createFunLocalSession>[0]) as unknown as GameSession<C>;
   const { seats, config, rules, bot, random = Math.random, scheduler = realScheduler } = options;
   const freshDeck = () => shuffle(rules.createDeck(), random);
   let snapshot: Snapshot<C> = { game: createGame(seats, config, freshDeck()), deadline: null, events: [] };

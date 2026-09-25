@@ -4,15 +4,21 @@ import { shuffle } from './standardRules';
 export function createGame<C extends Card>(seats: Seat[], config: Config, deck: C[]): GameState<C> {
   if (seats.length < 2 || new Set(seats.map(s => s.id)).size !== seats.length) throw new Error('Provide at least two unique players.');
   if (!Number.isInteger(config.target) || config.target < 1 || (config.turnMs !== null && (!Number.isFinite(config.turnMs) || config.turnMs < 1000))) throw new Error('Invalid match settings.');
-  if (deck.length < seats.length) throw new Error('Not enough cards to deal.');
+  const remaining = [...deck];
+  const opening = seats.map(() => {
+    const index = remaining.findIndex(card => card.kind === 'standard');
+    if (index < 0) throw new Error('Not enough normal cards to deal.');
+    return remaining.splice(index, 1)[0];
+  });
   return {
     phase: 'playing', config: { ...config }, round: 1, activeIndex: 0, turnId: 1, history: [], winnerIds: [],
-    players: seats.map((seat, i) => ({ ...seat, hand: [deck[i]], status: 'playing', total: 0, roundScore: 0 })),
-    deck: deck.slice(seats.length), decksAdded: 1,
+    players: seats.map((seat, i) => ({ ...seat, hand: [opening[i]], status: 'playing', total: 0, roundScore: 0 })),
+    deck: remaining, decksAdded: 1,
   };
 }
 
 export function applyCommand<C extends Card>(state: GameState<C>, command: Command, rules: Rules<C>, random: () => number = Math.random): Transition<C> {
+  if (rules.apply) return rules.apply(state, command, random);
   const active = state.players[state.activeIndex];
   if (state.phase !== 'playing' || command.turnId !== state.turnId || command.playerId !== active.id || active.status !== 'playing' || !['hit', 'quit'].includes(command.action)) return { state, events: [] };
   const player = { ...active, hand: [...active.hand] };
@@ -26,7 +32,7 @@ export function applyCommand<C extends Card>(state: GameState<C>, command: Comma
   };
   let won = false;
   const bonuses: GameEvent[] = [];
-  let type: GameEvent['type'] = command.action;
+  let type: GameEvent['type'] = command.action === 'quit' ? 'quit' : 'hit';
   if (command.action === 'hit' && deck.length) {
     const outcome = rules.resolveDraw(player.hand, deck.shift()!);
     player.hand = outcome.hand;
@@ -65,8 +71,9 @@ export function applyCommand<C extends Card>(state: GameState<C>, command: Comma
 
 export function nextRound<C extends Card>(state: GameState<C>, deck: C[]): GameState<C> {
   if (state.phase !== 'round-over') return state;
-  if (deck.length < state.players.length) throw new Error('Not enough cards to deal.');
+  const fresh = createGame(state.players, state.config, deck);
   return { ...state, round: state.round + 1, phase: 'playing', activeIndex: state.round % state.players.length,
-    turnId: state.turnId + 1, deck: deck.slice(state.players.length), decksAdded: 1,
-    players: state.players.map((p, i) => ({ ...p, hand: [deck[i]], status: 'playing', roundScore: 0 })) };
+    turnId: state.turnId + 1, deck: fresh.deck, decksAdded: 1,
+    special: state.special ? { serial: state.special.serial + 1, queue: [], discard: [], dailyDouble: [], blinded: [], traps: state.special.traps, } : undefined,
+    players: state.players.map((p, i) => ({ ...p, hand: fresh.players[i].hand, status: 'playing', roundScore: 0 })) };
 }

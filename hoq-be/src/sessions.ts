@@ -1,15 +1,16 @@
 import { randomInt, randomUUID } from 'node:crypto';
 import { applyCommand, createGame, nextRound } from '../../hoq-fe/src/game/engine';
-import { standardBot } from '../../hoq-fe/src/game/bots';
-import { shuffle, standardRules } from '../../hoq-fe/src/game/standardRules';
-import type { Config, GameEvent, GameState, StandardCard } from '../../hoq-fe/src/game/types';
+import { shuffle } from '../../hoq-fe/src/game/standardRules';
+import { funRules, decisionActor, fallbackCommand, validCommand } from '../../hoq-fe/src/game/specials/framework';
+import { projectGame, projectEvents, botCommand } from '../../hoq-fe/src/game/specials/view';
+import type { Command, Config, GameEvent, GameState, GameCard } from '../../hoq-fe/src/game/types';
 import { fail, type Request } from './protocol';
 
 export interface Peer { send(message: unknown): void; close(): void }
 export interface Member { playerId: string; seatId: string; name: string; peer?: Peer; disconnectedAt?: number; departed: boolean; requests: Map<string, string> }
 export interface Session {
   id: string; joinCode: string; host?: string; config: Config; members: Map<string, Member>;
-  game: GameState<StandardCard> | null; revision: number; deadline: number | null;
+  game: GameState<GameCard> | null; revision: number; deadline: number | null;
   timers: ReturnType<typeof setTimeout>[]; generation: number; emptySince?: number;
 }
 export interface Options { maxPlayers: number; reconnectMs: number; idleMs: number; botMs: number; code: () => string; now: () => number }
@@ -73,7 +74,7 @@ export class Sessions {
     if (previous) {
       if (previous !== JSON.stringify(request)) fail('REQUEST_ID_REUSED', 'Use a new request ID for each operation.');
       peer.send({ type: 'request.ok', requestId: request.requestId, revision: session.revision });
-      peer.send(this.snapshot(session)); return;
+      peer.send(this.snapshot(session, [], member.seatId)); return;
     }
     switch (request.type) {
       case 'session.configure':
@@ -81,15 +82,15 @@ export class Sessions {
         if (session.game && session.game.phase !== 'game-over') fail('GAME_ACTIVE', 'Rules can only change before a game.');
         session.config = { target: request.payload.config.target, turnMs: request.payload.config.turnMs };
         this.changed(session); break;
-      case 'session.sync': peer.send(this.snapshot(session)); break;
+      case 'session.sync': peer.send(this.snapshot(session, [], member.seatId)); break;
       case 'round.start': {
         if (session.host !== member.playerId) fail('NOT_HOST', 'Only the host can start a round.');
         if (session.game?.phase === 'playing') fail('ROUND_ACTIVE', 'A round is already in progress.');
         this.prune(session);
         const seats = [...session.members.values()].filter(m => !m.departed).map(m => ({ id: m.seatId, name: m.name, controller: m.peer ? 'human' as const : 'bot' as const }));
         if (seats.length < 2) fail('NOT_ENOUGH_PLAYERS', 'At least two players are required.');
-        const deck = shuffle(standardRules.createDeck());
-        if (seats.length > deck.length) fail('DECK_CAPACITY', 'The selected rules do not have enough cards for these players.');
+        const deck = shuffle(funRules.createDeck());
+        if (seats.length > deck.filter(c => c.kind === 'standard').length) fail('DECK_CAPACITY', 'Not enough normal cards for opening hands.');
         if (session.game?.phase === 'round-over') {
           const old = session.game;
           const players = seats.map(seat => ({ ...seat, hand: [], status: 'playing' as const, total: old.players.find(p => p.id === seat.id)?.total ?? 0, roundScore: 0 }));
@@ -100,8 +101,10 @@ export class Sessions {
       case 'player.action': {
         const game = session.game;
         if (!game || game.phase !== 'playing' || game.round !== request.payload.round || game.turnId !== request.payload.turnId) fail('STALE_TURN', 'This turn is no longer active.');
-        if (game.players[game.activeIndex].id !== member.seatId) fail('NOT_YOUR_TURN', 'Only the active player may act.');
-        this.act(session, request.payload.action); break;
+        if (decisionActor(game) !== member.seatId) fail('NOT_YOUR_TURN', 'Only the player making this decision may act.');
+        const command: Command = { ...request.payload, playerId: member.seatId };
+        if (!validCommand(game, command)) fail('INVALID_ACTION', 'This action or choice is no longer available.');
+        this.act(session, command); break;
       }
       case 'session.leave': this.disconnect(peer, true); break;
     }
@@ -114,18 +117,18 @@ export class Sessions {
   }
   private joined(peer: Peer, session: Session, member: Member, requestId: string) {
     peer.send({ type: 'session.joined', requestId, playerId: member.playerId, seatId: member.seatId, sessionId: session.id, joinCode: session.joinCode });
-    peer.send(this.snapshot(session));
+    peer.send(this.snapshot(session, [], member.seatId));
   }
-  snapshot(session: Session, events: GameEvent[] = []) {
+  snapshot(session: Session, events: GameEvent[] = [], viewerId = '') {
     // Engine IDs are public seat IDs, never the private reconnect player IDs.
-    const game = session.game ? { ...session.game, deck: [...session.game.deck].sort((a, b) => a.id.localeCompare(b.id)) } : null;
+    const game = session.game ? projectGame(session.game, viewerId) : null;
     return { type: 'session.state', sessionId: session.id, joinCode: session.joinCode, config: session.config, revision: session.revision, maxPlayers: this.options.maxPlayers,
       hostSeatId: session.members.get(session.host ?? '')?.seatId ?? null,
       members: [...session.members.values()].map(m => ({ seatId: m.seatId, name: m.name, connected: !!m.peer,
         waiting: !!game && !game.players.some(p => p.id === m.seatId), departed: m.departed })),
-      game, deadline: session.deadline, events };
+      game, deadline: session.deadline, events: session.game ? projectEvents(events, session.game, viewerId) : events };
   }
-  private broadcast(session: Session, events: GameEvent[] = []) { const message = this.snapshot(session, events); for (const member of session.members.values()) member.peer?.send(message); }
+  private broadcast(session: Session, events: GameEvent[] = []) { for (const member of session.members.values()) member.peer?.send(this.snapshot(session, events, member.seatId)); }
   private changed(session: Session, events: GameEvent[] = []) { session.revision++; this.broadcast(session, events); }
   private controller(session: Session, member: Member, controller: 'human' | 'bot') {
     if (session.game) session.game = { ...session.game, players: session.game.players.map(p => p.id === member.seatId ? { ...p, controller } : p) };
@@ -150,10 +153,12 @@ export class Sessions {
       if (!member.peer && !active && (member.departed || (member.disconnectedAt !== undefined && this.options.now() - member.disconnectedAt >= this.options.reconnectMs))) session.members.delete(id);
     }
   }
-  private act(session: Session, action: 'hit' | 'quit') {
+  private act(session: Session, command: Command) {
     const game = session.game!;
     const expired = session.deadline !== null && this.options.now() >= session.deadline;
-    const result = applyCommand(game, { playerId: game.players[game.activeIndex].id, turnId: game.turnId, action: expired ? 'hit' : action }, standardRules);
+    if (!validCommand(game, command)) return;
+    const result = applyCommand(game, expired ? fallbackCommand(game) : command, funRules);
+    if (result.state === game) return;
     session.game = result.state;
     this.prune(session); this.schedule(session, true); this.changed(session, result.events);
   }
@@ -162,13 +167,13 @@ export class Sessions {
     const game = session.game;
     if (!game || game.phase !== 'playing') { session.deadline = null; return; }
     if (newTurn) session.deadline = game.config.turnMs === null ? null : this.options.now() + game.config.turnMs;
-    const enqueue = (delay: number, action: () => 'hit' | 'quit') => {
+    const enqueue = (delay: number, action: () => Command) => {
       const timer = setTimeout(() => { if (session.generation === generation && this.sessionsById.has(session.id)) this.act(session, action()); }, delay);
       timer.unref(); session.timers.push(timer);
     };
-    if (session.deadline !== null) enqueue(Math.max(0, session.deadline - this.options.now()), () => 'hit');
-    const player = game.players[game.activeIndex];
-    if (player.controller === 'bot') enqueue(this.options.botMs, () => standardBot({ player, remainingCards: [...game.deck].sort((a, b) => a.id.localeCompare(b.id)) }, Math.random));
+    if (session.deadline !== null) enqueue(Math.max(0, session.deadline - this.options.now()), () => fallbackCommand(game));
+    const player = game.players.find(p => p.id === decisionActor(game))!;
+    if (player.controller === 'bot') enqueue(this.options.botMs, () => botCommand(game, Math.random));
   }
   sweep() {
     for (const session of this.sessionsById.values()) {

@@ -1,11 +1,11 @@
 import React, { useEffect, useRef } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import type { Player, StandardCard } from '../game/types';
+import type { Player, GameCard } from '../game/types';
 import { Label } from './components';
 import { colors } from './theme';
 
-export function OpponentList({ players, activeId, stacked, compact, availableWidth, onInspect }: {
-  players: Player<StandardCard>[]; activeId: string | null; stacked: boolean; compact: boolean;
+export function OpponentList({ players, activeId, stacked, compact, availableWidth, onInspect, hidden = false }: {
+  players: Player<GameCard>[]; activeId: string | null; stacked: boolean; compact: boolean; hidden?: boolean;
   availableWidth: number; onInspect(id: string): void;
 }) {
   const scroll = useRef<ScrollView>(null);
@@ -24,10 +24,10 @@ export function OpponentList({ players, activeId, stacked, compact, availableWid
     {!crowded && <View style={[s.avatar, { backgroundColor: index % 2 ? colors.coral : colors.lime }]}><Label style={s.initial}>{player.name[0]}</Label></View>}
     <View style={!crowded && { flex: 1 }}>
       <Label style={[s.name, crowded && s.centered]}>{player.name} {!crowded && player.controller === 'bot' && <Label style={s.bot}>BOT</Label>}</Label>
-      <Label style={[s.meta, crowded && s.centered]}>{player.total} PTS · {player.hand.length} CARDS</Label>
+      <Label style={[s.meta, crowded && s.centered]}>{hidden ? '?' : player.total} PTS · {player.hand.length} CARDS</Label>
     </View>
     <Label style={[s.badge, crowded && s.centered, { color: player.id === activeId ? colors.lime : player.status === 'bust' ? colors.coral : colors.muted }]}>
-      {player.id === activeId ? 'THINKING' : player.status === 'playing' ? 'WAITING' : player.status === 'bust' ? 'BUST' : `+${player.roundScore}`}
+      {player.id === activeId ? 'THINKING' : player.status === 'playing' ? 'WAITING' : player.status === 'bust' ? 'BUST' : hidden ? 'QUIT' : `+${player.roundScore}`}
     </Label>
   </Pressable>);
 

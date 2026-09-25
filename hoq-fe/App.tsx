@@ -5,6 +5,9 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { standardBot } from './src/game/bots';
 import { standardRules } from './src/game/standardRules';
+import { funRules } from './src/game/specials/framework';
+import type { GameCard } from './src/game/types';
+import type { BotPolicy } from './src/game/bots';
 import { BOT_COUNTS, TURN_OPTIONS, createLocalSeats } from './src/game/setup';
 import { createLocalSession } from './src/session/localSession';
 import type { GameSession } from './src/session/types';
@@ -62,7 +65,7 @@ export default function App() {
   useEffect(() => () => sessionRef.current?.dispose(), []);
   function start() {
     sessionRef.current?.dispose();
-    const next = createLocalSession({ rules: standardRules, bot: standardBot, config: { target, turnMs: seconds === null ? null : seconds * 1000 },
+    const next = createLocalSession({ rules: funRules, bot: (() => 'hit') as BotPolicy<GameCard>, config: { target, turnMs: seconds === null ? null : seconds * 1000 },
       seats: createLocalSeats(botCount) });
     sessionRef.current = next; setSession(next);
   }
@@ -83,7 +86,7 @@ export default function App() {
         <Label style={s.fieldLabel}>TIME PER TURN</Label><View style={[s.choices, mobile && s.mobileChoices]}>{TURN_OPTIONS.map(value => <Button key={value ?? 'unlimited'} label={value === null ? 'UNLIMITED' : `${value} SEC`} small={!mobile} tone={seconds === value ? 'lime' : 'cream'} onPress={() => setSeconds(value)} />)}</View>
         </>}
         {mode === 'solo' && <><Label style={s.fieldLabel}>NUMBER OF BOTS</Label><View style={s.choices}>{BOT_COUNTS.map(value => <View key={value} style={mobile && s.mobileBotOption}><Button label={`${value}`} small={!mobile} tone={botCount === value ? 'lime' : 'cream'} onPress={() => setBotCount(value)} /></View>)}</View></>}
-        <Label style={s.rules}>1 point per card · Flush +3 · Straight +3{ '\n' }Seven cards +5 and auto-bank.{ '\n' }A pair busts. {mode === 'join' ? 'The host chooses the target and turn timer.' : seconds === null ? 'Take your time. No automatic hits.' : 'Time runs out? You hit.'}</Label>
+        <Label style={s.rules}>1 point per card · Flush +3 · Straight +3{ '\n' }Seven cards +5. Thirteen safe cards wins!{ '\n' }One normal card to start. Special cards are in play.{ '\n' }A pair busts. {mode === 'join' ? 'The host chooses the target and turn timer.' : seconds === null ? 'Take your time. No automatic hits.' : 'Time runs out? You hit or auto-choose.'}</Label>
         {mode === 'solo' ? <Button label="DEAL ME IN →" tone="lime" onPress={start} /> : <Button label={busy ? 'CONNECTING…' : mode === 'host' ? 'CREATE TABLE' : 'JOIN TABLE'} tone="lime" disabled={busy || !name.trim() || (mode === 'join' && joinCode.length !== 6)} onPress={() => { void online(); }} />}
         {saved?.sessionId && <Button label="REJOIN SAVED TABLE" disabled={busy} onPress={() => { void online(true); }} />}
         {!!onlineError && <Label style={s.rules}>{onlineError}</Label>}

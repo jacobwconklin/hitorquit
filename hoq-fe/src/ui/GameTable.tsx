@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Animated, AppState, Modal, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
-import { standardRules } from '../game/standardRules';
+import { scoreCards } from '../game/specials/cards';
 import type { GameSession } from '../session/types';
 import { Button, Hand, Label, PlayingCard } from './components';
 import { colors } from './theme';
 import { DeckInventory } from './DeckInventory';
 import { OpponentList } from './OpponentList';
+import { SpecialPanel } from './SpecialPanel';
 
 function BonusToast({ messages }: { messages: string[] }) {
   const progress = useRef(new Animated.Value(0)).current;
@@ -33,13 +34,16 @@ export function GameTable({ session, onLeave }: { session: GameSession; onLeave(
   const [panel, setPanel] = useState<string | null>(null);
   const [bonus, setBonus] = useState<{ id: number; messages: string[] } | null>(null);
   const lastBonusTurn = useRef(-1);
+  const hidden = !!game.informationHidden;
+  useEffect(() => { if (hidden) { setPanel(null); setBonus(null); } }, [hidden]);
+  useEffect(() => { if (game.special?.pending) setPanel(null); }, [game.special?.pending?.id]);
   useEffect(() => {
-    const messages = events.filter(event => event.type === 'bonus').map(event => event.message);
+    const messages = hidden ? [] : events.filter(event => event.type === 'bonus').map(event => event.message);
     if (messages.length && lastBonusTurn.current !== game.turnId) {
       lastBonusTurn.current = game.turnId;
       setBonus({ id: game.turnId, messages });
     }
-  }, [events, game.turnId]);
+  }, [events, game.turnId, hidden]);
   const { width, height } = useWindowDimensions();
   const mobile = width < 1024;
   const compact = !mobile && height < 600;
@@ -54,11 +58,12 @@ export function GameTable({ session, onLeave }: { session: GameSession; onLeave(
   useEffect(() => () => cancelAnimationFrame(initialScroll.current.frame), []);
   const human = game.players.find(p => localPlayerId ? p.id === localPlayerId : p.controller === 'human')!;
   const opponents = game.players.filter(p => p.id !== human.id);
-  const active = game.players[game.activeIndex];
-  const canAct = game.phase === 'playing' && active.id === human.id && (!multiplayer || multiplayer.connected);
+  const pending = game.special?.pending;
+  const active = game.players.find(p => p.id === pending?.actorId) ?? game.players[game.activeIndex];
+  const canAct = game.phase === 'playing' && !pending && active.id === human.id && (!multiplayer || multiplayer.connected);
   const seconds = deadline === null ? 0 : Math.max(0, (deadline - now) / 1000);
   const unlimited = game.config.turnMs === null;
-  const score = standardRules.score(human.hand);
+  const score = scoreCards(human.hand);
   // Mobile cards wrap at a readable size rather than shrinking to fit one row.
   const cardWidth = mobile ? 72 : Math.min(compact ? 60 : 100, (width - 48 - Math.max(0, human.hand.length - 1) * 6) / Math.max(1, human.hand.length));
   useEffect(() => {
@@ -84,34 +89,35 @@ export function GameTable({ session, onLeave }: { session: GameSession; onLeave(
     </View>
     <View style={[s.arena, compact && { paddingTop: 9, paddingBottom: 8 }, mobile && s.mobileArena]}>
       {!mobile && <View pointerEvents="none" style={s.tableLine} />}
-      <OpponentList players={opponents} activeId={finished ? null : active.id} stacked={mobile} compact={compact} availableWidth={width - 48} onInspect={setPanel} />
+      <OpponentList players={opponents} hidden={hidden} activeId={finished ? null : active.id} stacked={mobile} compact={compact} availableWidth={width - 48} onInspect={setPanel} />
       <View style={[s.center, mobile && s.mobileCenter]}>
         {!compact && !mobile && <Label style={s.centerEyebrow}>PUSH YOUR LUCK</Label>}
-        {mobile && <Button label="SCORES / DECK →" onPress={() => setPanel('scores')} />}
+        {mobile && <Button label="SCORES / DECK →" disabled={hidden} onPress={() => setPanel('scores')} />}
         <View style={s.deckRow}><View style={s.deckStack}><PlayingCard width={compact ? 48 : 72} /></View>
-          <View style={s.deckInfo}><Label style={s.deckCount}>{game.deck.length} <Label style={s.subtle}>in the deck</Label></Label>{!mobile && <Button label="SCORES / DECK →" onPress={() => setPanel('scores')} small />}</View>
+          <View style={s.deckInfo}><Label style={s.deckCount}>{game.deck.length} <Label style={s.subtle}>in the deck</Label></Label>{!mobile && <Button label="SCORES / DECK →" disabled={hidden} onPress={() => setPanel('scores')} small />}</View>
         </View>
         <Label accessibilityLiveRegion="polite" style={[s.event, compact && { marginTop: 8, fontSize: 12 }]}>{events[0]?.message ?? `${game.players.length} players. Reach 13 cards to win instantly.`}</Label>
       </View>
       <View style={s.bottom}>
-        <View style={s.turnLine}><View style={[s.dot, { backgroundColor: canAct ? colors.lime : colors.muted }]} /><Label style={s.turnText}>{finished ? 'ROUND COMPLETE' : canAct ? 'YOUR TURN' : `${active.name.toUpperCase()}'S TURN`}</Label>{!finished && <Label style={{ color: !unlimited && canAct && seconds < 2 ? colors.coral : colors.lime, fontSize: unlimited ? 12 : compact ? 16 : 22 }}>{unlimited ? 'UNLIMITED' : `${seconds.toFixed(1)}s`}</Label>}</View>
+        <SpecialPanel game={game} session={session} viewerId={human.id} connected={!multiplayer || multiplayer.connected} />
+        <View style={s.turnLine}><View style={[s.dot, { backgroundColor: canAct ? colors.lime : colors.muted }]} /><Label style={s.turnText}>{finished ? 'ROUND COMPLETE' : pending ? active.id === human.id ? 'YOUR CHOICE' : `${active.name.toUpperCase()} IS CHOOSING` : canAct ? 'YOUR TURN' : `${active.name.toUpperCase()}'S TURN`}</Label>{!finished && <Label style={{ color: !unlimited && canAct && seconds < 2 ? colors.coral : colors.lime, fontSize: unlimited ? 12 : compact ? 16 : 22 }}>{unlimited ? 'UNLIMITED' : `${seconds.toFixed(1)}s`}</Label>}</View>
         {game.config.turnMs !== null && <View style={s.timerTrack}><View style={[s.timerFill, { width: `${Math.min(100, seconds * 1000 / game.config.turnMs * 100)}%` }]} /></View>}
         <View style={[s.actionRow, mobile && { gap: 32 }]}>
-          <View style={s.action}><Button label="QUIT" tone="coral" disabled={!canAct} onPress={() => session.submit({ playerId: human.id, turnId: game.turnId, action: 'quit' })} /></View>
-          <View style={s.action}><Button label="HIT" tone="lime" disabled={!canAct} onPress={() => session.submit({ playerId: human.id, turnId: game.turnId, action: 'hit' })} /></View>
+          <View style={s.action}><Button label="QUIT" tone="coral" disabled={!canAct} onPress={() => session.submit({ playerId: human.id, round: game.round, turnId: game.turnId, action: 'quit' })} /></View>
+          <View style={s.action}><Button label={game.special?.dailyDouble.includes(human.id) ? 'HIT ×2' : 'HIT'} tone="lime" disabled={!canAct} onPress={() => session.submit({ playerId: human.id, round: game.round, turnId: game.turnId, action: 'hit' })} /></View>
         </View>
-        <View style={s.handArea}><Hand cards={human.hand} width={cardWidth} /><Label style={[s.handLabel, compact && { fontSize: 12, marginTop: 7 }]}>{human.status === 'bust' ? 'BUST · 0 POINTS' : human.status === 'quit' ? `BANKED · ${human.roundScore} POINTS` : `YOUR HAND · ${score.total} POINT${score.total === 1 ? '' : 'S'}`}</Label></View>
+        <View style={s.handArea}><Hand cards={human.hand} width={cardWidth} /><Label style={[s.handLabel, compact && { fontSize: 12, marginTop: 7 }]}>{hidden ? 'YOUR HAND · ? POINTS' : human.status === 'bust' ? 'BUST · 0 POINTS' : human.status === 'quit' ? `BANKED · ${human.roundScore} POINTS` : `YOUR HAND · ${score.total} POINT${score.total === 1 ? '' : 'S'}`}</Label></View>
       </View>
     </View>
-    <View style={[s.footer, compact && { paddingVertical: 6 }, mobile && s.mobileFooter]}><Label style={s.footerText}>YOU: {human.total} PTS</Label><Label style={s.footerText}>PAIR = BUST   /   FLUSH +3   /   STRAIGHT +3   /   7 CARDS +5   /   13 CARDS = WIN</Label><Label style={s.footerText}>{multiplayer ? 'ONLINE PLAY' : 'LOCAL PLAY'}</Label></View>
+    <View style={[s.footer, compact && { paddingVertical: 6 }, mobile && s.mobileFooter]}><Label style={s.footerText}>YOU: {hidden ? '?' : human.total} PTS</Label><Label style={s.footerText}>PAIR = BUST   /   FLUSH +3   /   STRAIGHT +3   /   7 CARDS +5   /   13 CARDS = WIN</Label><Label style={s.footerText}>{multiplayer ? 'ONLINE PLAY' : 'LOCAL PLAY'}</Label></View>
     </ScrollView>
-    {bonus && !finished && <BonusToast key={bonus.id} messages={bonus.messages} />}
+    {bonus && !hidden && !finished && <BonusToast key={bonus.id} messages={bonus.messages} />}
     {(panel !== null || finished) && <Modal visible transparent animationType="fade" onRequestClose={() => setPanel(null)}>
       <View style={s.scrim}><View style={[s.panel, { width: panel === 'scores' ? 1000 : 620, maxHeight: height - 28, maxWidth: width - 28 }]}>
         <ScrollView contentContainerStyle={s.panelContent}>
           {panel === 'leave' ? <><Label style={s.panelTitle}>Leave the table?</Label><Label style={s.panelText}>{multiplayer ? 'A bot will finish your current round.' : 'This local match will be lost.'}</Label><Button label="KEEP PLAYING" onPress={() => setPanel(null)} tone="lime" /><Button label="LEAVE MATCH" onPress={onLeave} tone="coral" /></>
-          : inspected ? <><Label style={s.panelTitle}>{inspected.name}'s hand</Label><Hand cards={inspected.hand} width={compact ? 48 : 66} /><Label style={s.panelText}>{inspected.status === 'bust' ? 'Busted · 0 points' : `${standardRules.score(inspected.hand).total} points in hand`}</Label><Button label="BACK TO TABLE" onPress={() => setPanel(null)} /></>
-          : panel === 'scores' || panel === 'deck' ? <>
+          : inspected ? <><Label style={s.panelTitle}>{inspected.name}'s hand</Label><Hand cards={inspected.hand} width={compact ? 48 : 66} /><Label style={s.panelText}>{hidden ? 'Points hidden' : inspected.status === 'bust' ? 'Busted · 0 points' : `${scoreCards(inspected.hand).total} points in hand`}</Label><Button label="BACK TO TABLE" onPress={() => setPanel(null)} /></>
+          : !hidden && (panel === 'scores' || panel === 'deck') ? <>
             <View style={s.panelTop}><Label style={s.panelTitle}>{panel === 'scores' ? 'Scoreboard' : 'The remaining deck'}</Label><Button label={panel === 'scores' ? 'DECK →' : '← SCORES'} small onPress={() => setPanel(panel === 'scores' ? 'deck' : 'scores')} /></View>
             {panel === 'scores' ? <><ScrollView horizontal contentContainerStyle={{ flexGrow: 1 }}><View style={{ flexGrow: 1, minWidth: (game.players.length + 1) * 76 }}><View style={s.scoreRow}><Label style={s.scoreCell}>TOTAL</Label>{game.players.map(p => <Label key={p.id} style={s.scoreCell}>{p.name}{'\n'}{p.total}</Label>)}</View>{game.history.map(r => <View key={r.round} style={s.scoreRow}><Label style={s.scoreCell}>R{r.round}</Label>{game.players.map(p => <Label key={p.id} style={s.scoreCell}>{r.scores[p.id]}</Label>)}</View>)}</View></ScrollView>{!game.history.length && <Label style={s.panelText}>Your first round is in play.</Label>}</>
               : <DeckInventory deck={game.deck} decksAdded={game.decksAdded} />}

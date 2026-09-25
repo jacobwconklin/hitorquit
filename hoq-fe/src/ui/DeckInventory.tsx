@@ -2,16 +2,18 @@ import React from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { getDeckInventory, RANKS } from '../game/deckInventory';
 import { rankLabel } from '../game/standardRules';
-import type { StandardCard, Suit } from '../game/types';
-import { Label } from './components';
+import type { GameCard, StandardCard, Suit } from '../game/types';
+import { Label, cardLabel } from './components';
 import { colors } from './theme';
 
 const suitColors: Record<Suit, string> = {
   spades: '#8bc8ff', clubs: '#a5d98b', hearts: colors.coral, diamonds: '#f4dc78',
 };
 
-export function DeckInventory({ deck, decksAdded }: { deck: readonly StandardCard[]; decksAdded: number }) {
-  const { rows, totals } = getDeckInventory(deck, decksAdded);
+export function DeckInventory({ deck, decksAdded }: { deck: readonly GameCard[]; decksAdded: number }) {
+  const { rows, totals } = getDeckInventory(deck.filter((c): c is StandardCard => c.kind === 'standard'), decksAdded);
+  const specials = new Map<string, number>();
+  deck.filter(c => c.kind !== 'standard').forEach(c => { const label = cardLabel(c); specials.set(label, (specials.get(label) ?? 0) + 1); });
   return <View style={s.inventory}>
     <ScrollView horizontal contentContainerStyle={{ flexGrow: 1 }}>
       <View style={s.grid}>
@@ -32,6 +34,9 @@ export function DeckInventory({ deck, decksAdded }: { deck: readonly StandardCar
         </View>)}
       </View>
     </ScrollView>
+    <Label style={{ fontSize: 13 }}>SPECIALS REMAINING</Label>
+    {[...specials].map(([label, count]) => <Label key={label} style={{ fontSize: 12 }}>{label} · {count}</Label>)}
+    {!specials.size && <Label style={{ fontSize: 12 }}>None</Label>}
   </View>;
 }
 

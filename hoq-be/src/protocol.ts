@@ -5,7 +5,7 @@ export type Request = { requestId: string } & (
   | { type: 'session.join'; payload: { playerId: string; name: string; joinCode: string } }
   | { type: 'session.resume'; payload: { playerId: string; sessionId: string } }
   | { type: 'session.configure'; payload: { config: Config } }
-  | { type: 'player.action'; payload: { action: 'hit' | 'quit'; round: number; turnId: number } }
+  | { type: 'player.action'; payload: { action: 'hit' | 'quit' | 'choose'; round: number; turnId: number; choiceId?: string; optionId?: string } }
   | { type: 'round.start' | 'session.sync' | 'session.leave'; payload: Record<string, never> }
 );
 export class RequestError extends Error {
@@ -36,7 +36,8 @@ export function parseRequest(value: unknown): Request {
       break;
     case 'session.resume': identity(); if (typeof p.sessionId !== 'string' || p.sessionId.length > 80) fail('INVALID_ID', 'Provide a session ID.'); break;
     case 'player.action':
-      if (!['hit', 'quit'].includes(String(p.action)) || !Number.isSafeInteger(p.round) || !Number.isSafeInteger(p.turnId)) fail('INVALID_ACTION', 'Provide action, round, and turnId.');
+      if (!['hit', 'quit', 'choose'].includes(String(p.action)) || !Number.isSafeInteger(p.round) || !Number.isSafeInteger(p.turnId)) fail('INVALID_ACTION', 'Provide action, round, and turnId.');
+      if (p.action === 'choose' && (typeof p.choiceId !== 'string' || !/^choice-\d{1,12}$/.test(p.choiceId) || typeof p.optionId !== 'string' || !/^option-\d{1,5}$/.test(p.optionId))) fail('INVALID_ACTION', 'Provide a valid choiceId and optionId.');
       break;
     case 'round.start': case 'session.sync': case 'session.leave': break;
     default: fail('INVALID_MESSAGE', 'Unknown message type.');

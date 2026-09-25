@@ -4,9 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { WebSocket } from 'ws';
 import { createBackend } from '../src/server';
 import { createRemoteSession, type RemoteSession, type Socket } from '../../hoq-fe/src/session/remoteSession';
-import { createLocalSession } from '../../hoq-fe/src/session/localSession';
-import { standardRules } from '../../hoq-fe/src/game/standardRules';
-import { standardBot } from '../../hoq-fe/src/game/bots';
+import { createFunLocalSession } from '../../hoq-fe/src/session/funLocalSession';
+import { funRules } from '../../hoq-fe/src/game/specials/framework';
 import type { Identity } from '../../hoq-fe/src/session/identityStore';
 
 async function until(check: () => boolean) {
@@ -33,7 +32,7 @@ test('frontend adapters host, join, configure, play with solo parity, wait, reco
     const serverSession = [...backend.sessions.sessionsById.values()][0];
     const initial = serverSession.game!;
     const deck = [...initial.players.flatMap(p => p.hand), ...initial.deck];
-    const solo = createLocalSession({ seats: initial.players, config: initial.config, rules: { ...standardRules, createDeck: () => deck }, bot: standardBot, random: () => 0.999999 });
+    const solo = createFunLocalSession({ seats: initial.players, config: initial.config, rules: { ...funRules, createDeck: () => deck }, random: () => 0.999999 });
     try {
       for (const session of [host, joiner]) {
         const before = session.getSnapshot(); const command = { playerId: before.localPlayerId!, turnId: before.game.turnId, action: 'quit' as const };

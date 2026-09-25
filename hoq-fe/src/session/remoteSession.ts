@@ -1,4 +1,4 @@
-import type { Config, GameState, GameEvent } from '../game/types';
+import type { Config, GameState, GameEvent, GameCard } from '../game/types';
 import type { GameSession, Snapshot } from './types';
 import type { Identity } from './identityStore';
 
@@ -8,7 +8,7 @@ export interface Socket {
   onclose: ((event: { code: number }) => void) | null; onerror: (() => void) | null;
 }
 export interface RemoteState {
-  game: GameState | null; deadline: number | null; events: GameEvent[];
+  game: GameState<GameCard> | null; deadline: number | null; events: GameEvent[];
   revision: number; seatId?: string; hostSeatId?: string; joinCode: string; config: Config;
   members: { seatId: string; name: string; connected: boolean; waiting: boolean; departed: boolean }[];
   maxPlayers: number; connected: boolean; error?: string;
@@ -101,7 +101,7 @@ export function createRemoteSession(options: {
     getRemoteSnapshot: () => state,
     getSnapshot: () => { if (!snapshot) throw new Error('No game has started.'); return snapshot; },
     subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener); }; },
-    submit(command) { if (state.connected && state.game && command.playerId === state.seatId) send('player.action', { action: command.action, round: state.game.round, turnId: command.turnId }); },
+    submit(command) { if (state.connected && state.game && command.playerId === state.seatId) send('player.action', { action: command.action, round: command.round ?? state.game.round, turnId: command.turnId, choiceId: command.choiceId, optionId: command.optionId }); },
     advanceRound() { if (state.connected && state.hostSeatId === state.seatId) send('round.start'); },
     configure(config) { if (state.connected && state.hostSeatId === state.seatId) send('session.configure', { config }); },
     resume() { if (state.connected) send('session.sync'); else if (!terminal) { socket?.close(); connect(); } },
