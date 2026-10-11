@@ -10,7 +10,7 @@ The existing application's frontend and backend continue running on this same in
 Browser -- HTTPS --> CloudFront --> S3 (Hit or Quit static frontend)
         -- WSS ----> existing EC2 nginx :443
                        |-- existing app hostnames --> existing app ports
-                       `-- hoq-api.example.com --> 127.0.0.1:8081
+                       `-- hoq.conkgames.com --> 127.0.0.1:8081
                                                   /ws and /health
 ```
 
@@ -18,12 +18,12 @@ Browser -- HTTPS --> CloudFront --> S3 (Hit or Quit static frontend)
 | --- | --- |
 | EC2 host | `54.163.185.78` — the instance's verified current public IP |
 | SSH user | `ec2-user` |
-| Backend hostname | `hoq-api.example.com` — replace throughout |
+| Backend hostname | `hoq.conkgames.com` |
 | Frontend hostname | Your S3/CloudFront site's hostname |
 | Checkout | `~/HitOrQuit` — must be separate from the other app |
 | PM2 process | `hoq-backend` |
 | Backend listener | **`127.0.0.1:8081`**, subject to the free-port check below |
-| Public endpoints | `https://hoq-api.example.com/health`, `wss://hoq-api.example.com/ws` |
+| Public endpoints | `https://hoq.conkgames.com/health`, `wss://hoq.conkgames.com/ws` |
 
 Port 8081 is deliberately different from 3000, 5000, and the old guide's 3001. We have not inspected the live instance, so verify it is unused before reserving it. If occupied, choose another unused port and replace **every** 8081 reference below, including nginx and future automation settings. No application source change is needed: the server reads `HOST` and `PORT` from its environment.
 
@@ -78,7 +78,7 @@ Git, curl, Node/npm, nginx, PM2, and Certbot with nginx support are prerequisite
 
 ## 2. Configure the backend DNS and network access
 
-1. In Route 53 (or your DNS provider), add an **A record** for `hoq-api.example.com` pointing to the existing EC2 public IP. Use a new hostname, separate from the other app's API hostname.
+1. In Route 53 (or your DNS provider), add an **A record** for `hoq.conkgames.com` pointing to the existing EC2 public IP. Use a new hostname, separate from the other app's API hostname.
 2. Keep the other application's DNS records intact. Hit or Quit's frontend DNS points to its S3/CloudFront setup, not EC2.
 3. Reuse the instance's existing Elastic IP if present. If it has no stable IP, plan that change separately: associating a new Elastic IP can affect the other app's DNS.
 4. Confirm the EC2 security group and host firewall allow public TCP **80** and **443**, and SSH **22** from your permitted IP. Preserve existing rules needed by the other app.
@@ -184,12 +184,20 @@ Use the include layout actually shown by `sudo nginx -T`:
 - Ubuntu with `sites-enabled`: create `/etc/nginx/sites-available/hoq-backend`, then enable its symlink.
 - Amazon Linux or a `conf.d` layout: create `/etc/nginx/conf.d/hoq-backend.conf` directly; no symlink is needed when that directory is included.
 
-Create **one** new config file in the chosen layout. Do not replace the other application's file or delete its default site. Paste the following, replacing the hostname:
+Create **one** new config file in the chosen layout. Do not replace the other application's file or delete its default site. For this instance, open the file with administrator privileges (required to save under `/etc/nginx`):
+
+```bash
+sudo vim /etc/nginx/conf.d/hoq-backend.conf
+```
+
+Press `i` to enter insert mode, paste the configuration below, then press `Esc`, type `:wq`, and press Enter to save and exit. If you opened Vim without `sudo` and get `E212`, use `Esc`, `:q!`, Enter to discard that unsaved buffer, then reopen with the command above and paste again.
+
+Use this configuration with the actual backend hostname and port:
 
 ```nginx
 server {
     listen 80;
-    server_name hoq-api.example.com;
+    server_name hoq.conkgames.com;
 
     access_log /var/log/nginx/hoq-backend.access.log;
     error_log /var/log/nginx/hoq-backend.error.log;
@@ -231,7 +239,7 @@ Test, and reload only if the test succeeds:
 
 ```bash
 sudo nginx -t && sudo systemctl reload nginx
-curl --fail --show-error -H 'Host: hoq-api.example.com' http://127.0.0.1/health
+curl --fail --show-error -H 'Host: hoq.conkgames.com' http://127.0.0.1/health
 ```
 
 Recheck the other app's frontend and API after the reload. A graceful reload applies the added hostname without restarting nginx. If validation fails, fix or disable only the new file and retest; do not reload a failing configuration.
@@ -241,9 +249,9 @@ Recheck the other app's frontend and API after the reload. A graceful reload app
 With DNS propagated and port 80 reachable:
 
 ```bash
-sudo certbot --nginx --redirect -d hoq-api.example.com
+sudo certbot --nginx --redirect -d hoq.conkgames.com
 sudo nginx -t
-curl --fail --show-error https://hoq-api.example.com/health
+curl --fail --show-error https://hoq.conkgames.com/health
 ```
 
 Request a certificate for **only this new backend hostname**. Keep the other app's certificate and frontend domains separate. Certbot updates the matching nginx site for TLS and HTTP-to-HTTPS redirection. Inspect the resulting site and recheck the existing application's HTTPS endpoints.
@@ -259,7 +267,7 @@ sudo certbot renew --cert-name ACTUAL_HOQ_CERT_NAME --dry-run
 On your **local development machine**, set this in `hoq-fe/.env.production` before exporting:
 
 ```dotenv
-EXPO_PUBLIC_WS_URL=wss://hoq-api.example.com/ws
+EXPO_PUBLIC_WS_URL=wss://hoq.conkgames.com/ws
 ```
 
 Remove or update any conflicting value in the build shell or other Expo env files. The public URL is baked into the static export; updating an EC2 variable cannot change an already-uploaded frontend.
@@ -280,10 +288,10 @@ The current WebSocket server does not enforce an Origin allowlist. It does not r
 
 ## 9. Verify the complete deployment
 
-1. Confirm `https://hoq-api.example.com/health` returns `{"status":"ok"}`. A request to the API root `/` returning 404 is expected.
+1. Confirm `https://hoq.conkgames.com/health` returns `{"status":"ok"}`. A request to the API root `/` returning 404 is expected.
 2. Open the deployed frontend and create a multiplayer table with **Host**.
 3. Open a second tab/device, select **Join**, enter the code, and play a round. Solo mode alone does not test the backend.
-4. In browser developer tools, verify the connection is `wss://hoq-api.example.com/ws` and upgrades with status **101**.
+4. In browser developer tools, verify the connection is `wss://hoq.conkgames.com/ws` and upgrades with status **101**.
 5. Refresh a player tab and verify **Rejoin saved table** works while the backend remains running.
 6. Check `pm2 logs hoq-backend --lines 50 --nostream` and the dedicated nginx error log.
 7. Verify both the other application's frontend and backend still work, and review instance memory usage.

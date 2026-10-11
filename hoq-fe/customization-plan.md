@@ -1,12 +1,22 @@
 # Title-screen customization plan
 
+## Implementation status — October 11, 2026
+
+Updated per player feedback: font selection affects only displayed card ranks; all other game text stays Classic. The popup keeps its ranked-card/back preview and Reset/Done controls fixed above scrolling options. Front sets use full-width rows; back and font grids are retained. Promotional copy and the special-card preview have been removed. These changes supersede the original app-wide font and preview-copy proposals below.
+
+Implemented with five complete front sets (Default, Elements, Flowers, Swords, Tetra), eight backs, and thirteen fonts. Title-screen controls provide previews, automatic durable local preferences, reset, and font/storage fallbacks. Shared rendering applies the selections throughout the app. The home page also includes a collapsible special-card guide with explanations beside all action and passive cards, including WAR's generated reward.
+
+Validation: 74 frontend tests pass, including ten new appearance/guide tests; TypeScript passes; web export succeeds with all 41 assets. Browser interaction verified selection and reload persistence. Native export was blocked by a sandbox permission error when Hermes wrote temporary bytecode; permission for an unrestricted retry was declined. Native runtime, responsive visual inspection, and the remaining manual checks below still need verification.
+
+The original design below records the baseline before the new front folders and implementation were added. Its single-front-set gap and deferred implementation notes are historical.
+
 ## Objective and scope
 
 Let players independently choose a card-front set, card back, and font from the title screen, preview the result immediately, and retain their choices across launches. Apply their choices throughout Solo, Host, Join, and rejoined games.
 
 Recommended scope: these are local viewing preferences. Every card a player sees uses that player's selections, including inspected opponent hands. Other clients keep their own preferences; no backend, game rules, card data, or WebSocket protocol changes are needed. Use one font choice for card text and interface text, matching the existing shared `Label` design. Separate card/UI font choices, account synchronization, uploads, and in-match customization are outside this first implementation.
 
-This document is a plan; the customization feature is not implemented by this change.
+The following sections describe the implementation design and original acceptance criteria.
 
 ## Current implementation
 

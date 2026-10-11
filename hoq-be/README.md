@@ -29,13 +29,15 @@ Creation returns `session.joined` with the request ID, private player ID, public
 | `session.resume` | `playerId`, `sessionId` | Reclaim an existing seat, even when full; replaces an older connection. |
 | `session.configure` | `config` (`target`, `turnMs`) | Host changes rules in the lobby or after game-over. |
 | `round.start` | `{}` | Host starts the first/next round, or a fresh game after game-over. Requires two members. |
-| `player.action` | `action`, `round`, `turnId` | Active member requests `hit` or `quit`. The socket supplies the acting identity. |
+| `player.action` | `action`, `round`, `turnId`, plus `choiceId` and `optionId` for `choose` | Submit `hit`/`quit`, or the pending decision actor's `choose`. Socket supplies acting identity. |
 | `session.sync` | `{}` | Request the latest snapshot. |
 | `session.leave` | `{}` | Give up membership; a bot completes an ongoing round. |
 
-An accepted bound request returns `request.ok` with its request ID and current revision. Invalid requests return `request.error` with the request ID when available, an error code, and message. Invalid actions never mutate the game. A valid action received after its deadline becomes a Hit, matching offline behavior.
+An accepted bound request returns `request.ok` with its request ID and current revision. Invalid requests return `request.error` with the request ID when available, an error code, and message. Invalid actions never mutate the game. A valid action received after its deadline becomes a Hit for a normal turn, or the first legal option for a special choice, matching Solo. A pending choice has its own actor (possibly another player), unique choice ID, options, and fresh decision deadline; the original turn advances only after all effects finish.
 
 Each state change broadcasts `session.state` to members of that session only. Snapshots contain `sessionId`, `revision`, `maxPlayers`, `hostSeatId`, public `members`, `game` (null in the lobby), `deadline` (epoch milliseconds or null), and transition `events`. `game` follows the shared `GameState` shape, but every player reference is a public seat ID and `deck` is a sorted inventory, not future draw order. Private player IDs never appear in broadcasts. Clients should replace their state with the newest snapshot, and use `seatId` from `session.joined` to identify their own player. Snapshots can repeat a revision after sync or a request retry.
+
+The server uses the same `funRules` as Solo. See [implemented specials](../implemented_specials.md) for the 67-card deck, second-deck refill, and card assumptions. Snapshots are projected separately for each viewer on broadcast, sync, retry, and resume. Internal jobs, secret contest submissions, and trap ranks are omitted; blinded viewers receive hidden-card handles and no meaningful score/inventory values (`informationHidden` tells UI to hide them). Choice options are sent only to their decision actor, with opaque option IDs instead of executable selections. Bots use these same visibility rules. Upgrade frontend/backend together for the expanded card/choice schema.
 
 The last 128 accepted request IDs are retained per member. Retry the same request with the same ID and payload to avoid applying it twice. Use a fresh ID for each new operation. For initial create/join responses lost with the connection, join by code or resume by session ID when available; creation is not globally idempotent across disconnected sockets.
 

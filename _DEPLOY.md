@@ -1,3 +1,9 @@
+# Deploy frontend and backend together
+
+Build the frontend with `npm --prefix hoq-fe run build:web`, then run `node deploy-all.mjs` from the project root. This runs `fe-deploy.mjs` followed by `be-deploy.mjs` and stops on the first failure. The backend is still a skeleton, so the combined command currently fails at the backend step after a successful frontend upload. It does not roll back the frontend.
+
+The combined command has no dry-run option; use `node fe-deploy.mjs --dry-run` to preview frontend uploads.
+
 # Deploy the frontend to S3
 
 Requires Node.js 22.13+ and AWS CLI v2 on PATH. No additional npm packages are needed by the deploy script.

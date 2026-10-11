@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { Sessions, type Peer } from '../src/sessions';
-import { parseRequest } from '../src/protocol';
+import { parseRequest, RequestError } from '../src/protocol';
 
 class Client implements Peer {
   messages: any[] = []; closed = false; id = randomUUID();
@@ -38,7 +38,7 @@ test('late joins wait; actions are validated and deduplicated; next round admits
     const c = new Client(); request(registry, c, 'session.join', { playerId: c.id, name: 'C', joinCode: session.joinCode });
     assert.equal(session.game!.players.length, 2);
     const action = { action: 'quit', round: 1, turnId: session.game!.turnId };
-    assert.throws(() => request(registry, c, 'player.action', action), /active player/);
+    assert.throws(() => request(registry, c, 'player.action', action), (error: unknown) => error instanceof RequestError && error.code === 'NOT_YOUR_TURN');
     const id = request(registry, a, 'player.action', action);
     const revision = session.revision;
     request(registry, a, 'player.action', action, id); assert.equal(session.revision, revision);
@@ -53,7 +53,11 @@ test('late joins wait; actions are validated and deduplicated; next round admits
 test('disconnect substitutes a bot, transfers host, and reconnect cancels pending bot work', async () => {
   const { registry, a, b, session } = setup({ botMs: 15 });
   try {
-    request(registry, a, 'round.start'); registry.disconnect(a);
+    request(registry, a, 'round.start');
+    // This test concerns controller scheduling, not the number of special choices drawn.
+    const normalIndex = session.game!.deck.findIndex(card => card.kind === 'standard');
+    session.game!.deck.unshift(session.game!.deck.splice(normalIndex, 1)[0]);
+    registry.disconnect(a);
     assert.equal(session.host, b.id); assert.equal(session.game!.players[0].controller, 'bot');
     const c = new Client(); request(registry, c, 'session.resume', { playerId: a.id, sessionId: session.id });
     await new Promise(resolve => setTimeout(resolve, 40));
@@ -100,7 +104,8 @@ test('a configured limit above eight works without changing round logic', () => 
       const c = new Client(); request(registry, c, 'session.join', { playerId: c.id, name: `Player ${i}`, joinCode: session.joinCode });
     }
     request(registry, a, 'round.start');
-    assert.equal(session.game!.players.length, 12); assert.equal(session.game!.deck.length, 40);
+    assert.equal(session.game!.players.length, 12); assert.equal(session.game!.deck.length, 55);
+    assert.ok(session.game!.players.every(player => player.hand.length === 1 && player.hand[0].kind === 'standard'));
     for (const member of session.members.values()) request(registry, member.peer as Client, 'player.action', { action: 'quit', round: 1, turnId: session.game!.turnId });
     assert.equal(session.game!.phase, 'round-over');
   } finally { registry.dispose(); }
@@ -110,6 +115,9 @@ test('a late Quit becomes a Hit and reconnect does not extend the turn deadline'
   let now = 0; const { registry, a, session } = setup({ now: () => now });
   try {
     session.config.turnMs = 10000; request(registry, a, 'round.start');
+    // A late Quit must draw; choose a normal card so hand-size assertions are deterministic.
+    const normalIndex = session.game!.deck.findIndex(card => card.kind === 'standard');
+    session.game!.deck.unshift(session.game!.deck.splice(normalIndex, 1)[0]);
     const deadline = session.deadline;
     registry.disconnect(a); now = 5000;
     const c = new Client(); request(registry, c, 'session.resume', { playerId: a.id, sessionId: session.id });

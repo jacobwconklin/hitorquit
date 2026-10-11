@@ -1,6 +1,6 @@
 # Special cards: rules and implementation design
 
-Status: **design in progress; selected concepts accepted for the candidate list, one-normal-card opening rule settled, no special cards implemented.** Acceptance into this list is not approval to implement a card or all of its edge cases.
+Status: **design archive and future candidate list.** The first implemented selection and current assumptions are in [implemented_specials.md](implemented_specials.md); that concise file takes precedence over older proposals below. Unselected concepts here remain unimplemented.
 
 This is the working document for choosing fun cards and agreeing on a consistent way to execute them in Solo and multiplayer. Names, quantities, durations, and the rules below are proposals. Mark individual decisions accepted here before using them as implementation requirements.
 

@@ -25,15 +25,23 @@ Card backs are used only for the deck and face-down portions of dealing animatio
 
 ## Player customization
 
-Players will eventually be able to select a card-front set, a card back, and a font. Keep these as independent theme choices in a reusable asset registry so the renderer can apply selections consistently without changing gameplay logic.
+The title-screen **Customize cards & font** panel offers independent front, back, and font choices with a live preview and automatic local persistence. `src/appearance/catalog.ts` owns stable IDs and names; `assets.ts` maps them to explicit bundled asset imports. `AppearanceProvider` applies the resolved choices across the menu, lobby, and game without changing gameplay logic.
 
-Cosmetic selection controls are deferred. For the MVP, use only:
+First-launch and reset defaults remain:
 
 - **Card fronts:** `game-art/card-fronts/default/`.
 - **Font:** Classic, from `game-art/fonts/Classic.ttf`.
 - **Card back:** Triangle, from `game-art/card-backs/triangle.png`.
 
-Bundle these assets locally so rendering does not require a backend or remote font service. Other supplied assets remain available for future customization.
+Available fronts are Default, Elements, Flowers, Swords, and Tetra. Each is a complete four-suit set with the established blue/green/red/yellow mapping. Flowers uses the four `*-small-flower.png` files, excluding the older oversized yellow image. All eight backs and thirteen fonts are selectable. Fonts load on demand for the selected appearance and panel samples, with Classic/system fallback and retry if loading fails.
+
+To add a choice, add its stable ID/name to the catalog and its static `require(...)` sources to the typed asset registry. A front set must include all four suits. Do not import `.meta`, `.aseprite`, or superseded artwork. Persist only IDs; removed IDs fall back independently to defaults. Keep all assets local and preserve the clear rank area, aspect ratio, and pixelated web scaling.
+
+The selected font applies only to rank glyphs on cards and the font-option rank samples. Labels, buttons, title-screen inputs, customization controls, special-card names, and descriptions always use Classic (system fallback only on load failure). Special/rainbow/all-suit cards retain their plain frame; hidden cards retain `?` and never expose concealed values. The no-card draw deck uses the selected back.
+
+Keep the customization preview and Reset/Done controls outside the scrolling options so they remain visible. Preview four ranked cards and a back, without a special-card stand-in or promotional text. Front options each occupy an entire row; back and font options retain their wrapping grids. Scale the preview to fit narrow and short viewports.
+
+The collapsible **Meet the special cards** section follows setup on the home page. Pair each card with a wrapping explanation beside it and reuse the actual card renderer so it follows the player's choices. Action explanations come from the live special registry; include passive blanks, Rainbow Ace, and WAR's all-suit blank reward as well.
 
 ## Table layout
 

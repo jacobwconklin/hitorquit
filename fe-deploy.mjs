@@ -5,7 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseEnv } from 'node:util';
 
-// First re-build frontend with: $ npm run build:web in hoq-fe
+// First re-build frontend with: $ npx expo export --platform web
 
 // Set your destination here, including an optional folder prefix.
 // Example: 's3://my-website-bucket/hit-or-quit/'

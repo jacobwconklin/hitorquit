@@ -11,6 +11,7 @@ export const identityStore = createIdentityStore(Platform.OS === 'web' ? {
 export function backendUrl() {
   const configured = process.env.EXPO_PUBLIC_WS_URL;
   if (configured) return configured;
+  if (!__DEV__) return 'wss://hoq.conkgames.com/ws';
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     return window.location.protocol === 'https:' ? `wss://${window.location.host}/ws` : `ws://${window.location.hostname}:8080/ws`;
   }
