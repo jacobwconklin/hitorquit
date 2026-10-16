@@ -3,7 +3,8 @@ import { ScrollView, StyleSheet, TextInput, View, useWindowDimensions } from 're
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { funRules } from './src/game/specials/framework';
-import type { GameCard } from './src/game/types';
+import type { GameCard, SpecialCardId } from './src/game/types';
+import { ALL_SPECIAL_CARDS } from './src/game/specials/selection';
 import type { BotPolicy } from './src/game/bots';
 import { BOT_COUNTS, TURN_OPTIONS, createLocalSeats } from './src/game/setup';
 import { createLocalSession } from './src/session/localSession';
@@ -34,6 +35,7 @@ function Home() {
   const [target, setTarget] = useState(30);
   const [seconds, setSeconds] = useState<number | null>(10);
   const [botCount, setBotCount] = useState(2);
+  const [enabledSpecials, setEnabledSpecials] = useState<SpecialCardId[]>(() => [...ALL_SPECIAL_CARDS]);
   const [mode, setMode] = useState<'solo' | 'host' | 'join'>('solo');
   const [remote, setRemote] = useState<RemoteSession | null>(null);
   const remoteRef = useRef<RemoteSession | null>(null);
@@ -53,7 +55,7 @@ function Home() {
       const identity = await identityStore.load();
       if (!resume) { delete identity.sessionId; delete identity.endpoint; await identityStore.save(identity); }
       const next = createRemoteSession({ endpoint: resume && identity.endpoint ? identity.endpoint : backendUrl(), identity, name: name.trim(),
-        mode: resume ? 'resume' : mode === 'host' ? 'host' : 'join', joinCode, config: { target, turnMs: seconds === null ? null : seconds * 1000 },
+        mode: resume ? 'resume' : mode === 'host' ? 'host' : 'join', joinCode, config: { target, turnMs: seconds === null ? null : seconds * 1000, enabledSpecials },
         uuid: randomUUID, connect: url => new WebSocket(url) as unknown as Socket,
         save: async value => { await identityStore.save(value); setSaved(value); },
       });
@@ -70,7 +72,7 @@ function Home() {
   useEffect(() => () => sessionRef.current?.dispose(), []);
   function start() {
     sessionRef.current?.dispose();
-    const next = createLocalSession({ rules: funRules, bot: (() => 'hit') as BotPolicy<GameCard>, config: { target, turnMs: seconds === null ? null : seconds * 1000 },
+    const next = createLocalSession({ rules: funRules, bot: (() => 'hit') as BotPolicy<GameCard>, config: { target, turnMs: seconds === null ? null : seconds * 1000, enabledSpecials },
       seats: createLocalSeats(botCount) });
     sessionRef.current = next; setSession(next);
   }
@@ -98,7 +100,7 @@ function Home() {
       </View>
       </View>
       <HowToPlay />
-      <SpecialCardGuide />
+      <SpecialCardGuide selection={mode === 'join' ? undefined : { enabled: enabledSpecials, onChange: setEnabledSpecials, disabled: busy }} />
     </ScrollView>
     {customizing && <CustomizationPanel onClose={() => setCustomizing(false)} />}</>}
   </SafeAreaView></SafeAreaProvider>;

@@ -2,6 +2,7 @@ export interface Card { id: string; kind: string; deckNumber?: number; rankOverr
 export type Suit = 'spades' | 'clubs' | 'hearts' | 'diamonds';
 export interface StandardCard extends Card { kind: 'standard'; suit: Suit; rank: number }
 export type SpecialId = 'daily-double' | 'musical-chairs' | 'even-or-odd' | 'draw-three' | 'steal-card' | 'blindfold' | 'ransom' | 'booby-trap' | 'war' | 'chicken';
+export type SpecialCardId = SpecialId | `blank-${Suit}` | 'rainbow-ace';
 export interface SpecialCard extends Card { kind: 'special'; special: SpecialId }
 export interface BlankCard extends Card { kind: 'blank'; suit: Suit | 'all' }
 export interface RainbowCard extends Card { kind: 'rainbow'; suit: 'all'; rank: 1 }
@@ -12,7 +13,8 @@ export type PlayerStatus = 'playing' | 'quit' | 'bust';
 export interface Seat { id: string; name: string; controller: 'human' | 'bot' }
 export interface Player<C extends Card> extends Seat { hand: C[]; status: PlayerStatus; total: number; roundScore: number }
 // null means unlimited; keep settings serializable for future session adapters.
-export interface Config { target: number; turnMs: number | null }
+// Omitted means all specials for older clients; an empty list explicitly means none.
+export interface Config { target: number; turnMs: number | null; enabledSpecials?: readonly SpecialCardId[] }
 export interface Score { cards: number; flush: number; straight: number; seven: number; total: number }
 export interface RoundResult { round: number; scores: Record<string, number> }
 export interface GameState<C extends Card = StandardCard> {
@@ -23,7 +25,7 @@ export interface GameState<C extends Card = StandardCard> {
   informationHidden?: boolean;
 }
 export interface Rules<C extends Card> {
-  createDeck(): C[];
+  createDeck(config?: Config): C[];
   score(hand: readonly C[]): Score;
   resolveDraw(hand: readonly C[], drawn: C): { hand: C[]; bust: boolean; bank: boolean; win?: boolean };
   apply?: (state: GameState<C>, command: Command, random: () => number) => Transition<C>;

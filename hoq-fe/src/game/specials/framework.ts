@@ -1,14 +1,17 @@
-import type { Command, GameCard, Rules, SpecialId, Transition } from '../types';
+import type { Command, Config, GameCard, Rules, Transition } from '../types';
 import { shuffle, standardRules, SUITS } from '../standardRules';
 import { type EffectContext, type FunState, type Job, type SpecialState, effect } from './contracts';
 import { definitions } from './registry';
 import { faceRank, isBust, scoreCards } from './cards';
 
-export const SPECIAL_IDS: SpecialId[] = ['daily-double', 'musical-chairs', 'even-or-odd', 'draw-three', 'steal-card', 'blindfold', 'ransom', 'booby-trap', 'war', 'chicken'];
+import { copyMatchConfig, SPECIAL_IDS, specialCardId } from './selection';
+export { SPECIAL_IDS } from './selection';
 export const emptySpecialState = (): SpecialState => ({ serial: 0, queue: [], discard: [], dailyDouble: [], blinded: [], traps: [] });
-export function createFunDeck(): GameCard[] {
-  return [...standardRules.createDeck(), ...SPECIAL_IDS.map(special => ({ id: `special-${special}`, kind: 'special' as const, special })),
+export function createFunDeck(config: Config = { target: 30, turnMs: null }): GameCard[] {
+  const enabled = new Set(copyMatchConfig(config).enabledSpecials);
+  const deck: GameCard[] = [...standardRules.createDeck(), ...SPECIAL_IDS.map(special => ({ id: `special-${special}`, kind: 'special' as const, special })),
     ...SUITS.map(suit => ({ id: `blank-${suit}`, kind: 'blank' as const, suit })), { id: 'rainbow-ace', kind: 'rainbow', rank: 1, suit: 'all' }];
+  return deck.filter(card => card.kind === 'standard' || enabled.has(specialCardId(card)!));
 }
 export const decisionKey = (state: FunState) => `${state.round}:${state.turnId}:${state.special?.pending?.id ?? 'action'}`;
 export const decisionActor = (state: FunState) => state.special?.pending?.actorId ?? state.players[state.activeIndex].id;
@@ -70,7 +73,7 @@ export function applySpecialCommand(original: FunState, command: Command, random
   };
   function replenish() {
     if (state.deck.length < 13 && state.decksAdded === 1) {
-      state.deck = shuffle([...state.deck, ...createFunDeck().map(c => ({ ...c, id: `deck-2:${c.id}`, deckNumber: 2 }))], random);
+      state.deck = shuffle([...state.deck, ...createFunDeck(state.config).map(c => ({ ...c, id: `deck-2:${c.id}`, deckNumber: 2 }))], random);
       state.decksAdded = 2; events.push({ type: 'special', message: 'A second deck has been shuffled in.' });
     }
   }

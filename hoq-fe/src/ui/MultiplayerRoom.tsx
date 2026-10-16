@@ -5,6 +5,8 @@ import { GameTable } from './GameTable';
 import { Button, Label } from './components';
 import { RuleControls } from './RuleControls';
 import { colors } from './theme';
+import { SpecialCardGuide } from './SpecialCardGuide';
+import { ALL_SPECIAL_CARDS } from '../game/specials/selection';
 
 export function MultiplayerRoom({ session, onLeave }: { session: RemoteSession; onLeave(): void }) {
   const state = useSyncExternalStore(session.subscribe, session.getRemoteSnapshot, session.getRemoteSnapshot);
@@ -25,9 +27,12 @@ export function MultiplayerRoom({ session, onLeave }: { session: RemoteSession; 
     <Label>{state.members.length} / {state.maxPlayers} players</Label>
     {state.members.map(member => <Label key={member.seatId}>{member.name}{member.seatId === state.seatId ? ' (you)' : ''}{member.seatId === state.hostSeatId ? ' · HOST' : ''}{!member.connected ? ' · DISCONNECTED' : member.waiting ? ' · WAITING' : ''}</Label>)}
     {state.game && <View style={{ gap: 8 }}><Label>ROUND {state.game.round} · {state.game.phase === 'playing' ? `${state.game.players[state.game.activeIndex].name}'s turn` : 'Round complete'}</Label>{state.game.players.map(player => <Label key={player.id}>{player.name}: {player.total} points · {player.hand.length} cards · {player.status}</Label>)}</View>}
-    {host && (!state.game || state.game.phase === 'game-over') ? <RuleControls config={state.config} disabled={!state.connected} onChange={session.configure} /> :
+    {host && (!state.game || state.game.phase === 'game-over') ? <RuleControls config={state.config} disabled={!state.connected || state.configuring} onChange={session.configure} /> :
       <Label>First to {state.config.target} · {state.config.turnMs === null ? 'Unlimited turns' : `${state.config.turnMs / 1000} seconds per turn`}</Label>}
-    {host ? <Button label={state.game ? 'START NEXT ROUND' : 'START GAME'} tone="lime" disabled={!state.connected || state.members.filter(m => !m.departed).length < 2 || state.game?.phase === 'playing'} onPress={session.advanceRound} /> : <Label>The host starts the game and each new round.</Label>}
+    <SpecialCardGuide selection={{ enabled: state.config.enabledSpecials ?? ALL_SPECIAL_CARDS,
+      onChange: host && (!state.game || state.game.phase === 'game-over') ? enabledSpecials => session.configure({ ...state.config, enabledSpecials }) : undefined,
+      disabled: !state.connected || state.configuring }} />
+    {host ? <Button label={state.game ? 'START NEXT ROUND' : 'START GAME'} tone="lime" disabled={!state.connected || state.configuring || state.members.filter(m => !m.departed).length < 2 || state.game?.phase === 'playing'} onPress={session.advanceRound} /> : <Label>The host starts the game and each new round.</Label>}
     <Button label="LEAVE TABLE" onPress={onLeave} />
   </ScrollView>;
 }

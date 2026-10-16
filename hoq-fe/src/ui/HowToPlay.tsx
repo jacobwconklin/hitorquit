@@ -42,7 +42,7 @@ export function HowToPlay() {
       <Label accessibilityElementsHidden importantForAccessibility="no" style={s.symbol}>{expanded ? '−' : '+'}</Label>
     </Pressable>
     {expanded && <View style={s.content}>
-      <Bullet>Start each round with one normal card. Special cards are mixed into the deck.</Bullet>
+      <Bullet>Start each round with one normal card. Selected special cards are mixed into the deck.</Bullet>
       <Bullet>Hit to draw. Quit to bank your hand's points and stop drawing for the round.</Bullet>
       <Bullet>Each scoring card is worth 1 point, regardless of rank. Blanks count; action specials resolve without staying in your hand.</Bullet>
       <Bullet>Any duplicate rank busts your hand: 0 points for the round. Previously banked rounds stay safe.</Bullet>

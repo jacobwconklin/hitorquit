@@ -27,10 +27,15 @@ test('frontend adapters host, join, configure, play with solo parity, wait, reco
     const host = client('host'); await until(() => host.getRemoteSnapshot().members.length === 1);
     const joiner = client('join', host.getRemoteSnapshot().joinCode); await until(() => host.getRemoteSnapshot().members.length === 2);
     joiner.configure({ target: 50, turnMs: null }); assert.equal(host.getRemoteSnapshot().config.target, 30);
-    host.configure({ target: 50, turnMs: null }); await until(() => joiner.getRemoteSnapshot().config.target === 50);
+    host.configure({ target: 50, turnMs: null, enabledSpecials: ['blank-clubs', 'war'] });
+    assert.equal(host.getRemoteSnapshot().configuring, true);
+    await until(() => joiner.getRemoteSnapshot().config.target === 50 && !host.getRemoteSnapshot().configuring);
+    assert.deepEqual(joiner.getRemoteSnapshot().config.enabledSpecials, ['blank-clubs', 'war']);
     host.advanceRound(); await until(() => !!joiner.getRemoteSnapshot().game);
     const serverSession = [...backend.sessions.sessionsById.values()][0];
     const initial = serverSession.game!;
+    assert.equal(initial.deck.length + initial.players.length, 54);
+    assert.ok(initial.deck.every(card => card.kind === 'standard' || card.kind === 'blank' && card.suit === 'clubs' || card.kind === 'special' && card.special === 'war'));
     const deck = [...initial.players.flatMap(p => p.hand), ...initial.deck];
     const solo = createFunLocalSession({ seats: initial.players, config: initial.config, rules: { ...funRules, createDeck: () => deck }, random: () => 0.999999 });
     try {
@@ -53,6 +58,7 @@ test('frontend adapters host, join, configure, play with solo parity, wait, reco
     // Reload uses persisted private IDs and replaces the prior connection.
     const restored = client('resume', undefined, saved!); await until(() => restored.getRemoteSnapshot().connected);
     assert.equal(restored.getRemoteSnapshot().seatId, hostSeat);
+    assert.deepEqual(restored.getRemoteSnapshot().config.enabledSpecials, ['blank-clubs', 'war']);
     const newHost = remotes.find(s => s.getRemoteSnapshot().connected && s.getRemoteSnapshot().seatId === s.getRemoteSnapshot().hostSeatId)!;
     const oldHostSeat = newHost.getRemoteSnapshot().seatId;
     await newHost.leave();

@@ -1,4 +1,5 @@
 import type { Config } from '../../hoq-fe/src/game/types';
+import { isSpecialSelection } from '../../hoq-fe/src/game/specials/selection';
 
 export type Request = { requestId: string } & (
   | { type: 'session.create'; payload: { playerId: string; name: string; config: Config } }
@@ -46,4 +47,5 @@ export function parseRequest(value: unknown): Request {
 }
 function validateConfig(config: unknown) {
   if (!object(config) || !Number.isSafeInteger(config.target) || Number(config.target) < 1 || ![null, 10000, 30000].includes(config.turnMs as number | null)) fail('INVALID_CONFIG', 'Provide a positive target and turnMs of 10000, 30000, or null.');
+  if (config.enabledSpecials !== undefined && !isSpecialSelection(config.enabledSpecials)) fail('INVALID_CONFIG', 'enabledSpecials must be a list of unique supported special card IDs.');
 }

@@ -12,7 +12,7 @@ export function createLocalSession<C extends Card>(options: {
 }): GameSession<C> {
   if (options.rules.apply) return createFunLocalSession(options as unknown as Parameters<typeof createFunLocalSession>[0]) as unknown as GameSession<C>;
   const { seats, config, rules, bot, random = Math.random, scheduler = realScheduler } = options;
-  const freshDeck = () => shuffle(rules.createDeck(), random);
+  const freshDeck = () => shuffle(rules.createDeck(config), random);
   let snapshot: Snapshot<C> = { game: createGame(seats, config, freshDeck()), deadline: null, events: [] };
   let disposed = false;
   const listeners = new Set<() => void>();

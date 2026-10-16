@@ -1,6 +1,6 @@
 # Deploy the Hit or Quit backend to the existing AWS EC2 instance
 
-This is the manual setup guide we will work through before implementing backend update automation. Only the Hit or Quit backend runs on EC2. The Expo web frontend is exported to static files and served from S3, with CloudFront for HTTPS.
+This is the manual setup and recovery guide. Backend update automation is implemented in ../be-deploy.mjs; see ../_DEPLOY.md for current usage. Only the Hit or Quit backend runs on EC2. The Expo web frontend is exported to static files and served from S3, with CloudFront for HTTPS.
 
 The existing application's frontend and backend continue running on this same instance. Use a separate checkout, PM2 process, backend port, nginx configuration, and API hostname for Hit or Quit. This guide uses the repository's name `hoq-be` (the request's `foq-be` refers to this backend).
 
@@ -280,7 +280,7 @@ node fe-deploy.mjs --dry-run
 node fe-deploy.mjs
 ```
 
-Follow [the existing S3 deployment instructions](../_DEPLOY.md) for bucket configuration and local deployment credentials. The frontend deploy script already exists; the backend deploy script is still a skeleton. Handle CloudFront invalidation if needed by the site's cache policy.
+Follow [the existing S3 deployment instructions](../_DEPLOY.md) for bucket configuration and local deployment credentials. Both deployment scripts are implemented; see ../_DEPLOY.md for their current behavior. Handle CloudFront invalidation if needed by the site's cache policy.
 
 Use CloudFront in front of S3 for an HTTPS frontend: [S3 website endpoints do not support HTTPS](https://docs.aws.amazon.com/AmazonS3/latest/userguide/WebsiteEndpoints.html). The browser connects directly to the EC2 API hostname over WSS. There is no Hit or Quit frontend PM2 process or EC2 frontend nginx block.
 
@@ -345,4 +345,4 @@ sudo tail -n 100 /var/log/nginx/hoq-backend.error.log
 
 Avoid PM2 operations targeting `all`, replacing the shared nginx config, or restarting the other application's processes.
 
-When we automate updates using `../be-deploy.mjs`, record the verified SSH host/user, branch, absolute checkout/backend/env-file paths, Node/PM2 paths, process name `hoq-backend`, entry `dist/hoq-be/src/server.js`, and health URL **`http://127.0.0.1:8081/health`**. Its current 8080 example must be replaced when filling in configuration. Automation should preserve this one-process setup, stop on build/test failure, restart only Hit or Quit, verify health with bounded retries, and support rollback. Provisioning, DNS, TLS, and frontend S3 updates remain separate steps.
+`../be-deploy.mjs` now contains the verified SSH connection, checkout paths, Node interpreter, `hoq-backend` process, and health URL **`http://127.0.0.1:8081/health`**. It checks the existing configuration, fast-forwards from GitHub, builds/tests, restarts only Hit or Quit, and verifies health with bounded retries. Run it with `--dry-run` to preview commands without connecting. It updates in place and prints the previous commit for manual recovery; automatic rollback is not implemented. Provisioning, DNS, TLS, and frontend S3 updates remain separate steps.

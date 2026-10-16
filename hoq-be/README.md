@@ -27,13 +27,17 @@ Creation returns `session.joined` with the request ID, private player ID, public
 | --- | --- | --- |
 | `session.join` | `playerId`, `name`, `joinCode` | Join a lobby or wait for the next round; codes are case insensitive. |
 | `session.resume` | `playerId`, `sessionId` | Reclaim an existing seat, even when full; replaces an older connection. |
-| `session.configure` | `config` (`target`, `turnMs`) | Host changes rules in the lobby or after game-over. |
+| `session.configure` | `config` (`target`, `turnMs`, optional `enabledSpecials`) | Host changes rules in the lobby or after game-over. |
 | `round.start` | `{}` | Host starts the first/next round, or a fresh game after game-over. Requires two members. |
 | `player.action` | `action`, `round`, `turnId`, plus `choiceId` and `optionId` for `choose` | Submit `hit`/`quit`, or the pending decision actor's `choose`. Socket supplies acting identity. |
 | `session.sync` | `{}` | Request the latest snapshot. |
 | `session.leave` | `{}` | Give up membership; a bot completes an ongoing round. |
 
 An accepted bound request returns `request.ok` with its request ID and current revision. Invalid requests return `request.error` with the request ID when available, an error code, and message. Invalid actions never mutate the game. A valid action received after its deadline becomes a Hit for a normal turn, or the first legal option for a special choice, matching Solo. A pending choice has its own actor (possibly another player), unique choice ID, options, and fresh decision deadline; the original turn advances only after all effects finish.
+
+Both `session.create` and `session.configure` accept `config.enabledSpecials`, an array of unique IDs from `hoq-fe/src/game/specials/selection.ts`: the ten action IDs, `blank-spades`, `blank-clubs`, `blank-hearts`, `blank-diamonds`, and `rainbow-ace`. Omission defaults to all for older clients; `[]` means no specials. Invalid IDs, duplicate IDs, and non-array values are rejected with `INVALID_CONFIG`. All 52 standard cards are always included. The all-suit blank is generated only by WAR, not an independently selectable deck card.
+
+Normalized selections are included in lobby snapshots and `game.config`, remain fixed for a match, and apply to every new round and second-deck refill. Host transfer, sync, resume, and late joins retain the same settings. Updating lobby settings after game-over does not alter the completed game's configuration. Deploy the updated backend before the frontend so the server enforces card exclusions.
 
 Each state change broadcasts `session.state` to members of that session only. Snapshots contain `sessionId`, `revision`, `maxPlayers`, `hostSeatId`, public `members`, `game` (null in the lobby), `deadline` (epoch milliseconds or null), and transition `events`. `game` follows the shared `GameState` shape, but every player reference is a public seat ID and `deck` is a sorted inventory, not future draw order. Private player IDs never appear in broadcasts. Clients should replace their state with the newest snapshot, and use `seatId` from `session.joined` to identify their own player. Snapshots can repeat a revision after sync or a request retry.
 

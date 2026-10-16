@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createDeployment, executeDeployment } from '../fe-deploy.mjs';
+import { createDeployment, executeDeployment, main } from '../fe-deploy.mjs';
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'hoq-deploy-'));
@@ -13,6 +13,34 @@ function fixture(t) {
   writeFileSync(join(root, '.env'), 'AWS_ACCESS_KEY_ID=test-key\nAWS_SECRET_ACCESS_KEY="test=secret"\nAWS_REGION=us-east-1\nAWS_SESSION_TOKEN=test-token\n');
   return root;
 }
+
+test('builds before validating output and uploading, including dry runs', t => {
+  const root = fixture(t);
+  const index = join(root, 'hoq-fe', 'dist', 'index.html');
+  rmSync(index);
+  const calls = [];
+  main(['--dry-run'], (file, args, options) => {
+    calls.push({ file, args, options });
+    if (calls.length === 1) writeFileSync(index, '<html>Fresh build</html>');
+    return { status: 0 };
+  }, root);
+  assert.equal(calls.length, 3);
+  assert.equal(calls[0].options.cwd, join(root, 'hoq-fe'));
+  assert.match(calls[0].args.join(' '), /expo export --platform web/);
+  assert.ok(calls.slice(1).every(call => call.file === 'aws' && call.args.includes('--dryrun')));
+});
+
+test('skip-build uses existing output without invoking the builder', t => {
+  const calls = [];
+  main(['--skip-build'], (file) => { calls.push(file); return { status: 0 }; }, fixture(t));
+  assert.deepEqual(calls, ['aws', 'aws']);
+});
+
+test('failed build prevents uploads even when old output exists', t => {
+  let calls = 0;
+  assert.throws(() => main([], () => { calls++; return { status: 1 }; }, fixture(t)), /Frontend build failed/);
+  assert.equal(calls, 1);
+});
 
 test('scopes uploads to the prefix, passes credentials only through env, publishes index last', t => {
   const root = fixture(t);

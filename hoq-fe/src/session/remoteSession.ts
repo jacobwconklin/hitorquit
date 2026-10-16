@@ -11,7 +11,7 @@ export interface RemoteState {
   game: GameState<GameCard> | null; deadline: number | null; events: GameEvent[];
   revision: number; seatId?: string; hostSeatId?: string; joinCode: string; config: Config;
   members: { seatId: string; name: string; connected: boolean; waiting: boolean; departed: boolean }[];
-  maxPlayers: number; connected: boolean; error?: string;
+  maxPlayers: number; connected: boolean; configuring: boolean; error?: string;
 }
 export interface RemoteSession extends GameSession {
   getRemoteSnapshot(): RemoteState;
@@ -25,7 +25,7 @@ export function createRemoteSession(options: {
   save(identity: Identity): Promise<void>; retryMs?: number;
 }): RemoteSession {
   let identity = { ...options.identity };
-  let state: RemoteState = { game: null, deadline: null, events: [], revision: -1, joinCode: '', config: options.config, members: [], maxPlayers: 8, connected: false };
+  let state: RemoteState = { game: null, deadline: null, events: [], revision: -1, joinCode: '', config: options.config, members: [], maxPlayers: 8, connected: false, configuring: false };
   let snapshot: Snapshot | undefined;
   let socket: Socket | undefined;
   let disposed = false; let terminal = false; let attempt = 0;
@@ -34,6 +34,7 @@ export function createRemoteSession(options: {
   let watchdog: ReturnType<typeof setTimeout> | undefined;
   let leaveDone: (() => void) | undefined;
   let leaveRequest: string | undefined;
+  let configRequest: string | undefined;
   const listeners = new Set<() => void>();
   function update(patch: Partial<RemoteState>) {
     state = { ...state, ...patch };
@@ -74,18 +75,20 @@ export function createRemoteSession(options: {
         update({ game: message.game, deadline: message.deadline, events: message.events, revision: message.revision,
           config: message.config, members: message.members, hostSeatId: message.hostSeatId, maxPlayers: message.maxPlayers, joinCode: message.joinCode });
       } else if (message.type === 'request.error') {
+        if (message.requestId === configRequest) { configRequest = undefined; update({ configuring: false }); }
         update({ error: message.message });
         if (['SESSION_EXPIRED', 'MEMBER_NOT_FOUND', 'MEMBERSHIP_ENDED'].includes(message.code)) {
           persist({ playerId: identity.playerId }); terminal = true; current.close(); update({ connected: false });
         } else if (!state.connected) { terminal = true; clearTimeout(watchdog); current.close(); }
       } else if (message.type === 'request.ok') {
+        if (message.requestId === configRequest) { configRequest = undefined; update({ configuring: false }); }
         if (message.requestId === leaveRequest) leaveDone?.();
         else update({ error: undefined });
       }
     };
     current.onclose = event => {
       if (disposed || socket !== current) return;
-      clearTimeout(watchdog); update({ connected: false });
+      clearTimeout(watchdog); configRequest = undefined; update({ connected: false, configuring: false });
       if (event.code === 1000 && !terminal) { terminal = true; update({ error: 'This session was opened elsewhere or closed. Return to the menu to reconnect.' }); }
       else reconnect();
     };
@@ -102,8 +105,13 @@ export function createRemoteSession(options: {
     getSnapshot: () => { if (!snapshot) throw new Error('No game has started.'); return snapshot; },
     subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     submit(command) { if (state.connected && state.game && command.playerId === state.seatId) send('player.action', { action: command.action, round: command.round ?? state.game.round, turnId: command.turnId, choiceId: command.choiceId, optionId: command.optionId }); },
-    advanceRound() { if (state.connected && state.hostSeatId === state.seatId) send('round.start'); },
-    configure(config) { if (state.connected && state.hostSeatId === state.seatId) send('session.configure', { config }); },
+    advanceRound() { if (state.connected && !state.configuring && state.hostSeatId === state.seatId) send('round.start'); },
+    configure(config) {
+      if (state.connected && !state.configuring && state.hostSeatId === state.seatId && (!state.game || state.game.phase === 'game-over')) {
+        configRequest = send('session.configure', { config });
+        if (configRequest) update({ configuring: true });
+      }
+    },
     resume() { if (state.connected) send('session.sync'); else if (!terminal) { socket?.close(); connect(); } },
     async leave() {
       terminal = true;

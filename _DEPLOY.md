@@ -1,6 +1,6 @@
 # Deploy frontend and backend together
 
-Build the frontend with `npm --prefix hoq-fe run build:web`, then run `node deploy-all.mjs` from the project root. This runs `fe-deploy.mjs` followed by `be-deploy.mjs` and stops on the first failure. The backend is still a skeleton, so the combined command currently fails at the backend step after a successful frontend upload. It does not roll back the frontend.
+Run `node deploy-all.mjs` from the project root. This runs `fe-deploy.mjs` (including its build) followed by `be-deploy.mjs` and stops on the first failure. Push backend changes to GitHub first. The backend pulls the remote main branch; the frontend builds local files. A backend failure does not roll back the frontend.
 
 The combined command has no dry-run option; use `node fe-deploy.mjs --dry-run` to preview frontend uploads.
 
@@ -13,12 +13,11 @@ Requires Node.js 22.13+ and AWS CLI v2 on PATH. No additional npm packages are n
 3. Build and deploy from the project root:
 
 ```sh
-npm --prefix hoq-fe run build:web
 node fe-deploy.mjs --dry-run
 node fe-deploy.mjs
 ```
 
-The dry run contacts S3 to compare files but does not upload anything. Paths resolve relative to the script, so it also works when called from another directory.
+The script first runs `npx expo export --platform web` in `hoq-fe` and stops if the build fails. Install the frontend dependencies beforehand. Pass `--skip-build` to reuse the existing `hoq-fe/dist/` build. The dry run still builds unless `--skip-build` is passed, then contacts S3 to compare files without uploading anything. Paths resolve relative to the script, so it also works when called from another directory.
 
 The script syncs the **contents** of `hoq-fe/dist/` to the configured destination, preserving subfolders. It uploads dependencies first and always uploads `index.html` last, with `Cache-Control: no-cache` so clients revalidate. Sync uses the AWS CLI's size/modification-time comparison. An AWS command failure stops deployment and returns a nonzero exit code. Existing remote-only files are retained; there is no `--delete` operation.
 
@@ -28,21 +27,27 @@ For a deployment under a URL subpath, ensure the web export's asset URLs are con
 
 References: [AWS sync behavior](https://docs.aws.amazon.com/cli/latest/reference/s3/sync.html), [AWS credential environment variables](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-envvars.html).
 
-# Backend deployment skeleton for EC2
+# Deploy the backend to EC2
 
-`be-deploy.mjs` is a Node.js skeleton with empty configuration values at the top and explicit, unimplemented method stubs. Filling the values alone does **not** enable deployment. `node be-deploy.mjs --help` describes this; normal execution stops at missing configuration or an unimplemented stub.
+Commit and push changes to GitHub before deploying. The script prints this reminder on every run.
 
-Node matches the frontend deployment tooling and works from this Windows checkout using the installed OpenSSH client. A single SSH call will run a short shell script on the Linux EC2 machine. No Python dependency or local Bash installation is needed.
+```sh
+node be-deploy.mjs --dry-run
+node be-deploy.mjs
+```
 
-Planned sequence:
+The backend dry run prints the generated remote script without connecting to EC2. Normal deployment uses OpenSSH on PATH, the local key at ~/.ssh/conkgames-ec2, and strict host-key verification. The same SSH executable must already trust this server. No key contents are printed or uploaded.
 
-1. Authenticate to EC2 with the root PEM file (ignored by Git).
-2. Use the existing repository checkout, or clone it on the first deployment, then enter `hoq-be`.
-3. Pull the configured branch with `git pull --ff-only`.
-4. Run `npm ci` and `npm run build` on EC2.
-5. Restart the named PM2 process, or start it if this is the first deployment.
-6. Check `/health` and the PM2 process status, then save the PM2 process list.
+The CONFIG in be-deploy.mjs contains the verified ec2-user@54.163.185.78 connection, /home/ec2-user/hitorquit checkout, main branch, Node v24.20.0 path, hoq-backend PM2 process, and http://127.0.0.1:8081/health endpoint.
 
-Provision Node.js, npm, Git, curl, PM2, the backend environment file, and GitHub repository access on EC2 beforehand. Configure PM2 startup once for reboot recovery under the same SSH user. Verify the EC2 SSH host key locally. The PEM is for EC2 authentication; private GitHub access on EC2 needs its own credentials. Keep the whole repository on EC2 because the backend uses shared modules from `hoq-fe/src/game`.
+Deployment performs these steps in one SSH session:
 
-The script should let PM2 start the backend directly rather than also launching `npm start`, which would create a second server. Use one PM2 instance: sessions live in process memory, and restarting the backend ends active games. TLS/reverse-proxy configuration and EC2 provisioning remain separate from these deployment stubs.
+1. Verify the remote user, tools, checkout, origin, branch, clean working tree, readable backend .env, and existing PM2 process configuration. Lock the checkout against overlapping deployments.
+2. Record the previous commit, fetch main from GitHub, and fast-forward to the fetched commit. Reject local commits ahead of or diverged from GitHub.
+3. Run npm ci --include=dev and npm test inside hoq-be. The test script compiles the backend and shared frontend game modules before running backend tests.
+4. Recheck PM2 configuration and restart only the matching process ID, preserving its interpreter and environment-file arguments.
+5. Retry the local health endpoint with bounded waits, require JSON status ok, and verify the PM2 process is online.
+
+This automates updates to the existing installation. It does not clone a missing checkout, create a missing PM2 process, provision EC2, modify nginx, or save other applications' PM2 state. A configuration mismatch stops deployment for inspection.
+
+Build or test failures stop before the restart. Updates occur in place: dependencies and build files may already have changed when a failure occurs. No automatic rollback is performed. The previous commit is printed for manual recovery using the backend deployment guide. Successful restarts end active games because sessions are held in memory.

@@ -3,13 +3,15 @@ import { shuffle } from '../game/standardRules';
 import type { Command, Config, GameCard, GameEvent, Rules, Seat } from '../game/types';
 import { decisionActor, decisionKey, fallbackCommand, validCommand } from '../game/specials/framework';
 import { botCommand, projectEvents, projectGame } from '../game/specials/view';
+import { copyMatchConfig } from '../game/specials/selection';
 import type { GameSession, Scheduler, Snapshot } from './types';
 
 export function createFunLocalSession(options: { seats: Seat[]; config: Config; rules: Rules<GameCard>; random?: () => number; scheduler?: Scheduler }): GameSession {
   const random = options.random ?? Math.random;
   const scheduler: Scheduler = options.scheduler ?? { now: Date.now, schedule(fn, ms) { const timer = setTimeout(fn, ms); return () => clearTimeout(timer); } };
-  const fresh = () => shuffle(options.rules.createDeck(), random);
-  let game = createGame(options.seats, options.config, fresh());
+  const config = copyMatchConfig(options.config);
+  const fresh = () => shuffle(options.rules.createDeck(config), random);
+  let game = createGame(options.seats, config, fresh());
   const viewer = options.seats.find(s => s.controller === 'human')?.id ?? options.seats[0].id;
   let deadline: number | null = null, disposed = false;
   let cancel: (() => void)[] = [];

@@ -11,7 +11,7 @@ export function createGame<C extends Card>(seats: Seat[], config: Config, deck: 
     return remaining.splice(index, 1)[0];
   });
   return {
-    phase: 'playing', config: { ...config }, round: 1, activeIndex: 0, turnId: 1, history: [], winnerIds: [],
+    phase: 'playing', config: { ...config, ...(config.enabledSpecials === undefined ? {} : { enabledSpecials: [...config.enabledSpecials] }) }, round: 1, activeIndex: 0, turnId: 1, history: [], winnerIds: [],
     players: seats.map((seat, i) => ({ ...seat, hand: [opening[i]], status: 'playing', total: 0, roundScore: 0 })),
     deck: remaining, decksAdded: 1,
   };
@@ -26,7 +26,7 @@ export function applyCommand<C extends Card>(state: GameState<C>, command: Comma
   let decksAdded = state.decksAdded;
   const replenish = () => {
     if (deck.length < 13 && decksAdded === 1) {
-      deck = shuffle([...deck, ...rules.createDeck().map(card => ({ ...card, id: `deck-2:${card.id}`, deckNumber: 2 }))], random);
+      deck = shuffle([...deck, ...rules.createDeck(state.config).map(card => ({ ...card, id: `deck-2:${card.id}`, deckNumber: 2 }))], random);
       decksAdded = 2;
     }
   };

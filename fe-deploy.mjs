@@ -5,7 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseEnv } from 'node:util';
 
-// First re-build frontend with: $ npx expo export --platform web
+// Builds the frontend automatically unless --skip-build is passed.
 
 // Set your destination here, including an optional folder prefix.
 // Example: 's3://my-website-bucket/hit-or-quit/'
@@ -72,17 +72,26 @@ export function executeDeployment(deployment, run = spawnSync) {
   }
 }
 
-function main() {
-  const args = process.argv.slice(2);
+export function main(args = process.argv.slice(2), run = spawnSync, root = ROOT) {
   if (args.includes('--help')) {
-    console.log('Usage: node fe-deploy.mjs [--dry-run]\nUploads hoq-fe/dist/ to S3_FRONTEND_PATH using the root .env.\nBuild the frontend first. Remote files are not deleted.');
+    console.log('Usage: node fe-deploy.mjs [--dry-run] [--skip-build]\nRuns npx expo export --platform web in hoq-fe, then uploads dist/ using the root .env.\n--skip-build reuses the existing build. --dry-run builds but only previews uploads.\nRemote files are not deleted.');
     return;
   }
-  if (args.some(arg => arg !== '--dry-run')) throw new Error('Unknown option. Use node fe-deploy.mjs --help.');
+  if (args.some(arg => !['--dry-run', '--skip-build'].includes(arg))) throw new Error('Unknown option. Use node fe-deploy.mjs --help.');
   const dryRun = args.includes('--dry-run');
-  const deployment = createDeployment(ROOT, S3_FRONTEND_PATH, dryRun);
+  if (!args.includes('--skip-build')) {
+    console.log('Building frontend: npx expo export --platform web');
+    // Windows npx is a .cmd shim and must run through cmd.exe.
+    const windows = process.platform === 'win32';
+    const result = run(windows ? (process.env.ComSpec || 'cmd.exe') : 'npx',
+      windows ? ['/d', '/s', '/c', 'npx expo export --platform web'] : ['expo', 'export', '--platform', 'web'],
+      { cwd: join(root, 'hoq-fe'), stdio: 'inherit', shell: false });
+    if (result.error) throw new Error(`Unable to start frontend build: ${result.error.message}`);
+    if (result.status !== 0) throw new Error(`Frontend build failed: exited with ${result.status ?? result.signal ?? 'an error'}. Deployment stopped.`);
+  }
+  const deployment = createDeployment(root, S3_FRONTEND_PATH, dryRun);
   console.log(`${dryRun ? 'Previewing' : 'Deploying'} hoq-fe/dist/ → ${deployment.target}`);
-  executeDeployment(deployment);
+  executeDeployment(deployment, run);
   console.log(dryRun ? 'Preview complete. No files uploaded.' : 'Frontend uploaded to S3.');
 }
 

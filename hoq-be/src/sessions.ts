@@ -3,6 +3,7 @@ import { applyCommand, createGame, nextRound } from '../../hoq-fe/src/game/engin
 import { shuffle } from '../../hoq-fe/src/game/standardRules';
 import { funRules, decisionActor, fallbackCommand, validCommand } from '../../hoq-fe/src/game/specials/framework';
 import { projectGame, projectEvents, botCommand } from '../../hoq-fe/src/game/specials/view';
+import { copyMatchConfig } from '../../hoq-fe/src/game/specials/selection';
 import type { Command, Config, GameEvent, GameState, GameCard } from '../../hoq-fe/src/game/types';
 import { fail, type Request } from './protocol';
 
@@ -42,7 +43,7 @@ export class Sessions {
         let code = this.options.code();
         let attempts = 0;
         while (this.activeJoinCodes.has(code)) { if (++attempts > 1000) fail('CODE_UNAVAILABLE', 'Could not allocate a join code.'); code = this.options.code(); }
-        session = { id: randomUUID(), joinCode: code, config: { ...request.payload.config }, members: new Map(), game: null, revision: 0, deadline: null, timers: [], generation: 0 };
+        session = { id: randomUUID(), joinCode: code, config: copyMatchConfig(request.payload.config), members: new Map(), game: null, revision: 0, deadline: null, timers: [], generation: 0 };
         this.activeJoinCodes.add(code); this.sessionsById.set(session.id, session); this.sessionIdByJoinCode.set(code, session.id);
       } else {
         const id = request.type === 'session.join' ? this.sessionIdByJoinCode.get(request.payload.joinCode) : request.payload.sessionId;
@@ -80,7 +81,7 @@ export class Sessions {
       case 'session.configure':
         if (session.host !== member.playerId) fail('NOT_HOST', 'Only the host can set the rules.');
         if (session.game && session.game.phase !== 'game-over') fail('GAME_ACTIVE', 'Rules can only change before a game.');
-        session.config = { target: request.payload.config.target, turnMs: request.payload.config.turnMs };
+        session.config = copyMatchConfig(request.payload.config);
         this.changed(session); break;
       case 'session.sync': peer.send(this.snapshot(session, [], member.seatId)); break;
       case 'round.start': {
@@ -89,7 +90,7 @@ export class Sessions {
         this.prune(session);
         const seats = [...session.members.values()].filter(m => !m.departed).map(m => ({ id: m.seatId, name: m.name, controller: m.peer ? 'human' as const : 'bot' as const }));
         if (seats.length < 2) fail('NOT_ENOUGH_PLAYERS', 'At least two players are required.');
-        const deck = shuffle(funRules.createDeck());
+        const deck = shuffle(funRules.createDeck(session.config));
         if (seats.length > deck.filter(c => c.kind === 'standard').length) fail('DECK_CAPACITY', 'Not enough normal cards for opening hands.');
         if (session.game?.phase === 'round-over') {
           const old = session.game;
