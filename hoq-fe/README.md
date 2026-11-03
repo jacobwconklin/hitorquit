@@ -100,7 +100,7 @@ Validation: frontend rule/session/storage tests, backend adapter integration tes
 
 1. Use a Mac with Node.js 22.13+, pnpm, CocoaPods, and an Xcode version compatible with Expo SDK 55 and Apple's current submission requirements. Open Xcode, complete installation, and select its Command Line Tools in Xcode Settings. Windows can edit the shared source and build the website, but cannot run Xcode or create a local signed iOS archive.
 2. Enroll in the Apple Developer Program and sign in under Xcode Settings > Accounts. Register the explicit app identifier `com.jacobconklin.hitorquit` in the correct team, then create the matching iOS app record in App Store Connect. Team/account credentials are selected on the Mac and are not committed to this repository.
-3. Before the first submission, supply a final app icon and configure `expo.icon` (or `expo.ios.icon`) in `app.json`. There is no release icon configured yet. Prepare the store description, support/privacy-policy URLs, privacy answers, age rating, review contact, and required iPhone/iPad screenshots. Answer export-compliance questions according to the actual app and libraries; do not blindly declare an encryption exemption.
+3. The iOS icon is configured in `app.json` as `expo.ios.icon: "./assets/hitorquit.jpg"`. This is a 1024 × 1024 copy of the root `hitorquit.jpg`, kept inside the frontend so native builds include it. If the source artwork changes, replace that copy and rerun `npm run prebuild:ios` on the Mac before archiving. Prepare the store description, support/privacy-policy URLs, privacy answers, age rating, review contact, and required iPhone/iPad screenshots. Answer export-compliance questions according to the actual app and libraries; do not blindly declare an encryption exemption.
 
 ### Changes and checks for every release
 
@@ -134,10 +134,16 @@ Validation: frontend rule/session/storage tests, backend adapter integration tes
 
 | Version | iOS build | Status | Notes |
 | --- | --- | --- | --- |
-| 1.0.0 | 1 | Source configuration prepared; not uploaded | Bundle ID `com.jacobconklin.hitorquit`; iPhone and iPad enabled. Native archive, device testing, signing, release icon and store metadata still required on Mac/Apple accounts. |
+| 1.0.0 | 1 | Source configuration prepared; not uploaded | Bundle ID `com.jacobconklin.hitorquit`; iPhone and iPad enabled. iOS icon configured from `hitorquit.jpg`. Native archive, device testing, signing and store metadata still required on Mac/Apple accounts. |
 
 References: [Expo app configuration](https://docs.expo.dev/versions/latest/config/app/), [version and build numbers](https://docs.expo.dev/build-reference/app-versions/), [Xcode submission workflow](https://docs.expo.dev/submit/ios-manual/), [Apple build upload requirements](https://developer.apple.com/help/app-store-connect/manage-builds/upload-builds/).
 
 ## Match results
 
 Completed Solo and multiplayer games show a winner section followed by standings sorted by total points, with tied scores sharing a rank. Results include bust count, biggest hand (peak cards held at once, including the busting card), and best round (most points banked in one round). Peak hand size is tracked during play, including special-card effects; each completed round saves that peak and each player's final status alongside the existing scores. These records survive reconnects and new rounds, and reset with a new match. Previous participants remain in the results even if they left the table. Older server snapshots without detailed stats show a dash rather than invented zeros. Deploy the backend as well as the frontend to collect multiplayer statistics; no native version/build bump is implied by this source change.
+
+### Multiplayer bots
+
+The host can use **ADD BOT** or remove bots in the lobby and after a match. Humans plus bots may occupy at most eight seats. A host can play with just bots, or mix bots and friends. Bots remain through rounds and rematches; roster changes wait until the match ends. They are labeled BOT in the lobby and are never shown as disconnected humans.
+
+Decisions run on the authoritative server with a minimal scheduling delay, so the host device does not need to stay active to control bots. Human special-card choices still wait for input. New clients hide Add Bot on servers without bot support. Deploy backend before frontend; existing iOS clients remain compatible, but need a new native build to gain the controls.

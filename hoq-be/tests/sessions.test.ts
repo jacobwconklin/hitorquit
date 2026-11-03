@@ -129,14 +129,15 @@ test('explicit departure cannot reclaim an ongoing seat; malformed requests fail
   } finally { registry.dispose(); }
 });
 
-test('a configured limit above eight works without changing round logic', () => {
-  const { registry, a, session } = setup({ maxPlayers: 12 });
+test('eight players work and configured limits cannot exceed eight', () => {
+  assert.throws(() => new Sessions({ maxPlayers: 9 }), /between 2 and 8/);
+  const { registry, a, session } = setup({ maxPlayers: 8 });
   try {
-    for (let i = 2; i < 12; i++) {
+    for (let i = 2; i < 8; i++) {
       const c = new Client(); request(registry, c, 'session.join', { playerId: c.id, name: `Player ${i}`, joinCode: session.joinCode });
     }
     request(registry, a, 'round.start');
-    assert.equal(session.game!.players.length, 12); assert.equal(session.game!.deck.length, 55);
+    assert.equal(session.game!.players.length, 8); assert.equal(session.game!.deck.length, 59);
     assert.ok(session.game!.players.every(player => player.hand.length === 1 && player.hand[0].kind === 'standard'));
     for (const member of session.members.values()) request(registry, member.peer as Client, 'player.action', { action: 'quit', round: 1, turnId: session.game!.turnId });
     assert.equal(session.game!.phase, 'round-over');
@@ -239,5 +240,59 @@ test('temporary absence retains seat, score and host across long disconnects', (
     assert.equal(session.host, a.id);
     assert.deepEqual(session.game, before);
     assert.equal(restored.messages[1].game.phase, 'round-over');
+  } finally { registry.dispose(); }
+});
+
+test('only hosts manage persistent bots, with shared capacity and idempotent additions', () => {
+  const { registry, a, b, session } = setup();
+  try {
+    assert.throws(() => request(registry, b, 'session.addBot'), /Only the host/);
+    const id = request(registry, a, 'session.addBot');
+    request(registry, a, 'session.addBot', {}, id);
+    assert.equal(session.members.size, 3);
+    for (let i = 0; i < 5; i++) request(registry, a, 'session.addBot');
+    assert.equal(session.members.size, 8);
+    assert.throws(() => request(registry, a, 'session.addBot'), /full/);
+    const c = new Client();
+    assert.throws(() => request(registry, c, 'session.join', { playerId: c.id, name: 'C', joinCode: session.joinCode }), /full/);
+    const bot = [...session.members.values()].find(m => m.bot)!;
+    assert.throws(() => request(registry, c, 'session.resume', { playerId: bot.playerId, sessionId: session.id }), /cannot be claimed/);
+    assert.throws(() => request(registry, b, 'session.kick', { seatId: bot.seatId }), /Only the host/);
+    request(registry, a, 'session.kick', { seatId: bot.seatId });
+    request(registry, c, 'session.join', { playerId: c.id, name: 'C', joinCode: session.joinCode });
+    const bots = [...session.members.values()].filter(m => m.bot);
+    request(registry, a, 'round.start');
+    assert.equal(session.game!.players.filter(p => p.controller === 'bot').length, 5);
+    assert.throws(() => request(registry, a, 'session.addBot'), /before a game/);
+    assert.throws(() => request(registry, a, 'session.kick', { seatId: bots[0].seatId }), /before a game/);
+    request(registry, a, 'game.end');
+    request(registry, a, 'round.start');
+    assert.deepEqual(session.game!.players.filter(p => p.controller === 'bot').map(p => p.id), bots.map(m => m.seatId));
+    registry.disconnect(a, true);
+    assert.ok(session.host === b.id || session.host === c.id);
+    registry.disconnect(b, true); registry.disconnect(c, true);
+    assert.equal(session.host, undefined);
+    assert.notEqual(session.emptySince, undefined);
+  } finally { registry.dispose(); }
+});
+
+test('one human and seven server bots finish quickly and retain bot seats across rounds', async () => {
+  const { registry, a, b, session } = setup();
+  try {
+    request(registry, b, 'session.leave');
+    request(registry, a, 'session.configure', { config: { target: 1000, turnMs: null, enabledSpecials: [] } });
+    for (let i = 0; i < 7; i++) request(registry, a, 'session.addBot');
+    request(registry, a, 'round.start');
+    const botIds = session.game!.players.slice(1).map(p => p.id);
+    request(registry, a, 'player.action', { action: 'quit', round: 1, turnId: 1 });
+    const end = Date.now() + 1000;
+    while (session.game!.phase === 'playing' && Date.now() < end) await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal(session.game!.phase, 'round-over');
+    request(registry, a, 'round.start');
+    assert.deepEqual(session.game!.players.slice(1).map(p => p.id), botIds);
+    assert.ok(session.game!.players.slice(1).every(p => p.controller === 'bot'));
+    const snapshot = registry.snapshot(session);
+    assert.equal(snapshot.supportsBots, true);
+    assert.ok(snapshot.members.filter(m => m.bot).every(m => m.connected));
   } finally { registry.dispose(); }
 });

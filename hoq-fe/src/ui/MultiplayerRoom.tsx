@@ -15,6 +15,7 @@ function TableControls({ session, onLeave }: { session: RemoteSession; onLeave()
   const state = useSyncExternalStore(session.subscribe, session.getRemoteSnapshot, session.getRemoteSnapshot);
   const [confirm, setConfirm] = useState<'end' | 'leave' | string | null>(null);
   const host = !!state.seatId && state.seatId === state.hostSeatId;
+  const canEditBots = !state.game || state.game.phase === 'game-over';
   if (confirm) return <View style={{ gap: 16 }}>
     <Label style={{ fontSize: 24 }}>{confirm === 'end' ? 'End the game for everyone?' : confirm === 'leave' ? 'Leave this table?' : 'Remove this player?'}</Label>
     <Label>{confirm === 'end' ? 'The current game will stop for all players. Everyone returns to the menu, and you can change the rules and replay with the same code.' : confirm === 'leave' ? 'This releases your seat. To step away temporarily, just close or background the app instead. If you are the host, another player will become host.' : 'They will be removed from the table. A bot will finish their current round.'}</Label>
@@ -25,11 +26,12 @@ function TableControls({ session, onLeave }: { session: RemoteSession; onLeave()
     }} />
   </View>;
   return <View style={{ gap: 12 }}>
-    <Label>{state.members.length} / {state.maxPlayers} players</Label>
+    <Label>{state.members.length} / {state.maxPlayers} seats · {state.members.filter(m => !m.bot).length} players · {state.members.filter(m => m.bot).length} bots</Label>
     {state.members.map(member => <View key={member.seatId} style={{ gap: 6 }}>
-      <Label>{member.name}{member.seatId === state.seatId ? ' (you)' : ''}{member.seatId === state.hostSeatId ? ' · HOST' : ''}{!member.connected ? ' · DISCONNECTED' : ''}</Label>
-      {host && member.seatId !== state.seatId && <Button small label={`REMOVE ${member.name}`} disabled={!state.connected} onPress={() => setConfirm(member.seatId)} />}
+      <Label>{member.name}{member.bot ? ' · BOT' : ''}{member.seatId === state.seatId ? ' (you)' : ''}{member.seatId === state.hostSeatId ? ' · HOST' : ''}{!member.connected && !member.bot ? ' · DISCONNECTED' : ''}</Label>
+      {host && member.seatId !== state.seatId && (!member.bot || canEditBots) && <Button small label={`REMOVE ${member.name}`} disabled={!state.connected} onPress={() => member.bot ? session.kick(member.seatId) : setConfirm(member.seatId)} />}
     </View>)}
+    {host && state.supportsBots && canEditBots && <Button label="ADD BOT" disabled={!state.connected || state.members.length >= state.maxPlayers} onPress={session.addBot} />}
     {host && state.game && state.game.phase !== 'game-over' && <Button label="END GAME FOR EVERYONE" tone="coral" disabled={!state.connected} onPress={() => setConfirm('end')} />}
     <Button label="LEAVE TABLE" onPress={() => setConfirm('leave')} />
   </View>;

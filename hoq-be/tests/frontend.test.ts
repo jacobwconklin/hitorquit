@@ -26,6 +26,14 @@ test('frontend adapters host, join, configure, play with solo parity, reject lat
   try {
     const host = client('host'); await until(() => host.getRemoteSnapshot().members.length === 1);
     const joiner = client('join', host.getRemoteSnapshot().joinCode); await until(() => host.getRemoteSnapshot().members.length === 2);
+    assert.equal(host.getRemoteSnapshot().supportsBots, true);
+    host.addBot();
+    await until(() => joiner.getRemoteSnapshot().members.length === 3);
+    const bot = joiner.getRemoteSnapshot().members.find(m => m.bot)!;
+    assert.ok(bot.connected);
+    joiner.addBot();
+    host.kick(bot.seatId);
+    await until(() => host.getRemoteSnapshot().members.length === 2 && joiner.getRemoteSnapshot().members.length === 2);
     joiner.configure({ target: 50, turnMs: null }); assert.equal(host.getRemoteSnapshot().config.target, 30);
     host.configure({ target: 50, turnMs: null, enabledSpecials: ['blank-clubs', 'war'] });
     assert.equal(host.getRemoteSnapshot().configuring, true);

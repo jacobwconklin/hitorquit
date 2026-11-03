@@ -11,7 +11,7 @@ npm start
 
 The server listens on port 8080 by default. `GET /health` returns `{"status":"ok"}` and WebSocket clients connect to `ws://localhost:8080/ws`. `npm run dev` builds and starts once; it is not a file watcher.
 
-Environment variables are listed in `.env.example`. Set them in the process environment, or load a copied `.env` explicitly with `node --env-file=.env dist/hoq-be/src/server.js`. Defaults are eight members, 24 hours with no connected humans before session deletion, and 30-second heartbeats. Disconnected membership lasts for the lifetime of the table; RECONNECT_MS is retained for configuration compatibility but no longer expires seats. The cleanup sweep runs every second. `MAX_PLAYERS` is a server setting, never client controlled.
+Environment variables are listed in `.env.example`. Set them in the process environment, or load a copied `.env` explicitly with `node --env-file=.env dist/hoq-be/src/server.js`. Defaults are eight members, 24 hours with no connected humans before session deletion, and 30-second heartbeats. Disconnected membership lasts for the lifetime of the table; RECONNECT_MS is retained for configuration compatibility but no longer expires seats. The cleanup sweep runs every second. `MAX_PLAYERS` is a server setting from 2 to 8, never client controlled. Humans and persistent bots share this capacity.
 
 ## Protocol
 
@@ -63,8 +63,17 @@ After 24 hours with everyone disconnected (configurable via IDLE_MS), the server
 
 ## Rules and deployment
 
-The backend imports pure engine/types/rules/bot modules from `../hoq-fe/src/game`; compilation includes those modules under `dist/hoq-fe`. Keep the sibling source checkout when building, or deploy the complete generated `dist` tree with backend production dependencies. No Expo runtime is required by the server. Deck exhaustion follows the existing engine: a Hit against an empty deck banks the hand. The standard deck supports at most 52 initial participants; attempts above the selected rules' deck capacity fail clearly even if the configured membership limit is higher.
+The backend imports pure engine/types/rules/bot modules from `../hoq-fe/src/game`; compilation includes those modules under `dist/hoq-fe`. Keep the sibling source checkout when building, or deploy the complete generated `dist` tree with backend production dependencies. No Expo runtime is required by the server. Deck exhaustion follows the existing engine: a Hit against an empty deck banks the hand. Tables support at most eight combined human and bot seats.
 
 For EC2, run one process under a service manager. Terminate TLS at the reverse proxy and forward `/ws` with HTTP/1.1 `Upgrade` and `Connection` headers; use a proxy idle timeout longer than the heartbeat interval. Forward `/health` for health checks. Clients use `wss://<backend-host>/ws`. Keep the backend port private when a proxy fronts it. SIGTERM/SIGINT closes sockets and clears session timers. Slow clients with more than 1 MiB queued data are disconnected and can resync.
 
 The frontend now supports Solo/Host/Join via its session adapters. It persists identity in web sessionStorage or native AsyncStorage, renders lobby/waiting states, and handles reconnect/resync. See `../hoq-fe/README.md` for client setup. EC2 deployment remains a separate step.
+
+
+### Host-added bots
+
+Before a match or after game-over, the host may send `session.addBot` with `{}` or remove a bot using `session.kick` with its `seatId`. Additions are request-ID deduplicated and enforce the shared eight-seat maximum (or a smaller configured limit). Bot roster changes are rejected during a match, including between rounds. One human and at least one bot can start a game.
+
+Persistent bot members expose `bot: true`, `connected: true`, and public seat IDs. They keep their seats and scores across rounds and remain for rematches; they cannot reconnect as humans or become host. With no connected humans the normal idle cleanup still applies. Bot decisions use the existing server policy and a 1 ms scheduling delay by default, yielding between decisions. Special choices pause when a human must decide.
+
+Snapshots add `supportsBots: true`; new clients hide bot creation on older servers. Existing request and game-state formats remain supported for installed clients. Deploy the backend first, then the website; native controls require a new iOS build.
