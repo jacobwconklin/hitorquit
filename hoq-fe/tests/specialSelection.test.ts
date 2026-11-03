@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createGame } from '../src/game/engine';
 import { applySpecialCommand, createFunDeck, decisionActor, funRules } from '../src/game/specials/framework';
-import { ALL_SPECIAL_CARDS, copyMatchConfig, specialCardId } from '../src/game/specials/selection';
+import { ALL_SPECIAL_CARDS, DEFAULT_SPECIAL_CARDS, copyMatchConfig, specialCardId } from '../src/game/specials/selection';
 import { specialGuide } from '../src/game/specials/guide';
 import type { Config, GameCard, Seat, SpecialCardId } from '../src/game/types';
 import { createFunLocalSession } from '../src/session/funLocalSession';
@@ -11,9 +11,9 @@ const seats: Seat[] = ['a', 'b'].map(id => ({ id, name: id, controller: 'human' 
 const config = (enabledSpecials?: readonly SpecialCardId[]): Config => ({ target: 50, turnMs: null, enabledSpecials });
 function selectedIn(cards: readonly GameCard[]) { return cards.filter(card => card.kind !== 'standard').map(specialCardId).sort(); }
 
-test('default is all, none keeps all 52 standard cards, and every special is independently selectable', () => {
+test('default excludes group cards, none keeps all 52 standard cards, and every special is independently selectable', () => {
   assert.equal(createFunDeck().length, 67);
-  assert.deepEqual(createFunDeck(config(ALL_SPECIAL_CARDS)), createFunDeck());
+  assert.deepEqual(createFunDeck(config(DEFAULT_SPECIAL_CARDS)), createFunDeck());
   const normals = createFunDeck().filter(card => card.kind === 'standard');
   assert.deepEqual(createFunDeck(config([])), normals);
   for (const id of ALL_SPECIAL_CARDS) {
@@ -39,7 +39,7 @@ test('invalid choices are rejected and normalized match settings own their selec
   const copied = copyMatchConfig(config(choices));
   choices.push('chicken');
   assert.deepEqual(copied.enabledSpecials, ['war']);
-  assert.deepEqual(copyMatchConfig(config()).enabledSpecials, ALL_SPECIAL_CARDS);
+  assert.deepEqual(copyMatchConfig(config()).enabledSpecials, DEFAULT_SPECIAL_CARDS);
 });
 
 test('the automatically added second deck obeys the same exclusions', () => {

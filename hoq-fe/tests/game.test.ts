@@ -5,6 +5,8 @@ import { shuffle, standardRules } from '../src/game/standardRules';
 import { standardBot } from '../src/game/bots';
 import { createLocalSeats } from '../src/game/setup';
 import { createLocalSession } from '../src/session/localSession';
+import { funRules, decisionActor } from '../src/game/specials/framework';
+import { createFunLocalSession } from '../src/session/funLocalSession';
 import type { Scheduler } from '../src/session/types';
 import type { GameState, Seat, StandardCard, Suit } from '../src/game/types';
 
@@ -155,7 +157,7 @@ test('timeout hits once; stale human input cannot act for the bot; disposal clea
   const snapshot = session.getSnapshot();
   assert.equal(snapshot.game.players[0].hand.length, 2); assert.equal(snapshot.game.turnId, 2);
   session.submit({ playerId: 'you', turnId: 1, action: 'quit' }); assert.equal(session.getSnapshot(), snapshot);
-  clock.advance(1100); assert.equal(session.getSnapshot().game.turnId, 3);
+  clock.advance(1000); assert.equal(session.getSnapshot().game.turnId, 4);
   session.dispose(); assert.equal(clock.tasks.size, 0);
   const disposed = session.getSnapshot(); clock.advance(10000); assert.equal(session.getSnapshot(), disposed);
 });
@@ -191,7 +193,7 @@ test('unlimited turns never expire or auto-hit, but bots still play and the next
   session.submit({ playerId: 'you', turnId: initial.game.turnId, action: 'quit' });
   assert.equal(session.getSnapshot().game.players[0].status, 'quit');
   assert.equal(clock.tasks.size, 1); // Only the bot decision, no timeout.
-  clock.advance(1100); assert.equal(session.getSnapshot().game.turnId, 3);
+  clock.advance(1000); assert.equal(session.getSnapshot().game.phase, 'round-over');
   clock.advance(60000);
   assert.equal(session.getSnapshot().game.phase, 'round-over');
   assert.equal(session.getSnapshot().deadline, null); assert.equal(clock.tasks.size, 0);
@@ -232,3 +234,38 @@ test('all supported bot counts complete matches with unique seats and correct sc
 });
 
 
+
+for (const mode of ['standard', 'fun'] as const) {
+  for (let bots = 2; bots <= 7; bots++) {
+    test(`${mode}: ${bots} bots share one second and reset the pause for the next round`, () => {
+      const clock = new Clock();
+      const options = { seats: createLocalSeats(bots), config: { target: 1000, turnMs: null }, scheduler: clock, random: seeded(123) };
+      const session = mode === 'fun'
+        ? createFunLocalSession({ ...options, config: { ...options.config, enabledSpecials: [] }, rules: funRules })
+        : createLocalSession({ ...options, rules: standardRules, bot: standardBot });
+      session.submit({ playerId: 'you', turnId: 1, action: 'hit' });
+      const before = session.getSnapshot().game.turnId;
+      clock.advance(999);
+      assert.equal(session.getSnapshot().game.turnId, before);
+      clock.advance(1);
+      let game = session.getSnapshot().game;
+      assert.equal(decisionActor(game), 'you');
+      assert.equal(game.turnId, before + bots);
+      session.submit({ playerId: 'you', turnId: game.turnId, action: 'quit' });
+      const afterQuit = session.getSnapshot().game.turnId;
+      clock.advance(999);
+      assert.equal(session.getSnapshot().game.turnId, afterQuit);
+      clock.advance(1);
+      assert.equal(session.getSnapshot().game.phase, 'round-over');
+      assert.equal(clock.tasks.size, 0);
+      session.advanceRound();
+      game = session.getSnapshot().game;
+      clock.advance(999);
+      assert.equal(session.getSnapshot().game.turnId, game.turnId);
+      clock.advance(1);
+      assert.equal(decisionActor(session.getSnapshot().game), 'you');
+      session.dispose();
+      assert.equal(clock.tasks.size, 0);
+    });
+  }
+}

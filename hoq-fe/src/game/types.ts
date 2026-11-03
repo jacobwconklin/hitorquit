@@ -1,7 +1,7 @@
 export interface Card { id: string; kind: string; deckNumber?: number; rankOverride?: number; suitOverride?: Suit | 'all' }
 export type Suit = 'spades' | 'clubs' | 'hearts' | 'diamonds';
 export interface StandardCard extends Card { kind: 'standard'; suit: Suit; rank: number }
-export type SpecialId = 'daily-double' | 'musical-chairs' | 'even-or-odd' | 'draw-three' | 'steal-card' | 'blindfold' | 'ransom' | 'booby-trap' | 'war' | 'chicken';
+export type SpecialId = 'all-in' | 'mathematical' | 'daily-double' | 'musical-chairs' | 'even-or-odd' | 'draw-three' | 'steal-card' | 'blindfold' | 'ransom' | 'booby-trap' | 'war' | 'chicken';
 export type SpecialCardId = SpecialId | `blank-${Suit}` | 'rainbow-ace';
 export interface SpecialCard extends Card { kind: 'special'; special: SpecialId }
 export interface BlankCard extends Card { kind: 'blank'; suit: Suit | 'all' }
@@ -11,12 +11,12 @@ export type GameCard = StandardCard | SpecialCard | BlankCard | RainbowCard | Hi
 export type Action = 'hit' | 'quit';
 export type PlayerStatus = 'playing' | 'quit' | 'bust';
 export interface Seat { id: string; name: string; controller: 'human' | 'bot' }
-export interface Player<C extends Card> extends Seat { hand: C[]; status: PlayerStatus; total: number; roundScore: number }
+export interface Player<C extends Card> extends Seat { hand: C[]; status: PlayerStatus; total: number; roundScore: number; roundMaxHand?: number }
 // null means unlimited; keep settings serializable for future session adapters.
-// Omitted means all specials for older clients; an empty list explicitly means none.
+// Omitted means the default special selection; an empty list explicitly means none.
 export interface Config { target: number; turnMs: number | null; enabledSpecials?: readonly SpecialCardId[] }
 export interface Score { cards: number; flush: number; straight: number; seven: number; total: number }
-export interface RoundResult { round: number; scores: Record<string, number> }
+export interface RoundResult { round: number; scores: Record<string, number>; players?: Record<string, { name: string; status: PlayerStatus; cards: number }> }
 export interface GameState<C extends Card = StandardCard> {
   phase: 'playing' | 'round-over' | 'game-over'; config: Config;
   players: Player<C>[]; deck: C[]; round: number; activeIndex: number;

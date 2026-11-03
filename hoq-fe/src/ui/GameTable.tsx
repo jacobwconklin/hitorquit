@@ -1,7 +1,10 @@
+import { mustHit } from '../game/specials/allIn';
+import { MatchResults } from './MatchResults';
 import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Animated, AppState, Modal, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { scoreCards } from '../game/specials/cards';
 import type { GameSession } from '../session/types';
+import { remainingTurnMs } from '../session/countdown';
 import { Button, Hand, Label, PlayingCard } from './components';
 import { colors } from './theme';
 import { DeckInventory } from './DeckInventory';
@@ -29,8 +32,9 @@ function BonusToast({ messages, onDismiss }: { messages: string[]; onDismiss(): 
 }
 
 export function GameTable({ session, onLeave, tableControls }: { session: GameSession; onLeave(): void; tableControls?: React.ReactNode }) {
-  const { game, deadline, events, localPlayerId, multiplayer } = useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot);
-  const [now, setNow] = useState(Date.now());
+  const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot);
+  const { game, deadline, countdownDeadline, events, localPlayerId, multiplayer } = snapshot;
+  const [, setTimerTick] = useState(0);
   const [panel, setPanel] = useState<string | null>(null);
   const [bonus, setBonus] = useState<{ id: number; messages: string[] } | null>(null);
   const dismissBonus = useCallback(() => setBonus(null), []);
@@ -64,7 +68,7 @@ export function GameTable({ session, onLeave, tableControls }: { session: GameSe
   const pending = game.special?.pending;
   const active = game.players.find(p => p.id === pending?.actorId) ?? game.players[game.activeIndex];
   const canAct = game.phase === 'playing' && !pending && active.id === human.id && (!multiplayer || multiplayer.connected);
-  const seconds = deadline === null ? 0 : Math.max(0, (deadline - now) / 1000);
+  const seconds = remainingTurnMs(snapshot) / 1000;
   const unlimited = game.config.turnMs === null;
   const score = scoreCards(human.hand);
   const showEarnedBonuses = !hidden && human.status !== 'bust';
@@ -72,10 +76,9 @@ export function GameTable({ session, onLeave, tableControls }: { session: GameSe
   const cardWidth = mobile ? 72 : Math.min(compact ? 60 : 100, (width - 48 - Math.max(0, human.hand.length - 1) * 6) / Math.max(1, human.hand.length));
   useEffect(() => {
     if (deadline === null) return;
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 100);
+    const timer = setInterval(() => setTimerTick(tick => tick + 1), 100);
     return () => clearInterval(timer);
-  }, [deadline]);
+  }, [deadline, countdownDeadline]);
   useEffect(() => {
     if (multiplayer) return;
     const subscription = AppState.addEventListener('change', state => { if (state === 'active') session.resume(); });
@@ -84,11 +87,10 @@ export function GameTable({ session, onLeave, tableControls }: { session: GameSe
   const inspected = game.players.find(p => p.id === panel);
   const finished = game.phase !== 'playing';
   return <View style={s.table}>
-    {multiplayer && <View style={{ padding: 10, gap: 6 }}><Label selectable>CODE: {multiplayer.joinCode} · {multiplayer.isHost ? 'YOU ARE HOST' : 'MULTIPLAYER'}{!multiplayer.connected ? ' · RECONNECTING' : ''}</Label>{!!multiplayer.disconnectedNames?.length && <Label>Disconnected: {multiplayer.disconnectedNames.join(', ')}</Label>}{multiplayer.error && <Label accessibilityLiveRegion="polite" style={{ color: colors.coral }}>{multiplayer.error}</Label>}</View>}
-    {tableControls && <Button label="TABLE / PLAYERS" small onPress={() => setPanel('manage')} />}
     <ScrollView ref={tableScroll} style={s.tableScroll} contentContainerStyle={s.tableContent}
       onLayout={event => { initialScroll.current.viewport = event.nativeEvent.layout.height; scrollToStartingHand(); }}
       onContentSizeChange={(_, contentHeight) => { initialScroll.current.content = contentHeight; scrollToStartingHand(); }}>
+    {tableControls && <Button label="TABLE / PLAYERS" small onPress={() => setPanel('manage')} />}
     <View style={[s.header, compact && { paddingVertical: 8 }, mobile && s.mobileHeader]}>
       <Label style={[s.title, compact && { fontSize: 23 }, mobile && { fontSize: 28 }]}>HIT <Label style={s.or}>or</Label> QUIT</Label>
       <View style={[s.headerRight, mobile && s.mobileHeaderRight]}><Label style={s.headerMeta}>ROUND {String(game.round).padStart(2, '0')}   /   FIRST TO {game.config.target}</Label><Pressable accessibilityRole="button" onPress={() => setPanel('leave')}><Label style={s.exit}>EXIT</Label></Pressable></View>
@@ -105,12 +107,6 @@ export function GameTable({ session, onLeave, tableControls }: { session: GameSe
       </View>
       <View style={s.bottom}>
         <SpecialPanel game={game} session={session} viewerId={human.id} connected={!multiplayer || multiplayer.connected} />
-        <View style={s.turnLine}><View style={[s.dot, { backgroundColor: canAct ? colors.lime : colors.muted }]} /><Label style={s.turnText}>{finished ? 'ROUND COMPLETE' : pending ? active.id === human.id ? 'YOUR CHOICE' : `${active.name.toUpperCase()} IS CHOOSING` : canAct ? 'YOUR TURN' : `${active.name.toUpperCase()}'S TURN`}</Label>{!finished && <Label style={{ color: !unlimited && canAct && seconds < 2 ? colors.coral : colors.lime, fontSize: unlimited ? 12 : compact ? 16 : 22 }}>{unlimited ? 'UNLIMITED' : `${seconds.toFixed(1)}s`}</Label>}</View>
-        {game.config.turnMs !== null && <View style={s.timerTrack}><View style={[s.timerFill, { width: `${Math.min(100, seconds * 1000 / game.config.turnMs * 100)}%` }]} /></View>}
-        <View style={[s.actionRow, mobile && { gap: 32 }]}>
-          <View style={s.action}><Button label="QUIT" tone="coral" disabled={!canAct} onPress={() => session.submit({ playerId: human.id, round: game.round, turnId: game.turnId, action: 'quit' })} /></View>
-          <View style={s.action}><Button label={game.special?.dailyDouble.includes(human.id) ? 'HIT ×2' : 'HIT'} tone="lime" disabled={!canAct} onPress={() => session.submit({ playerId: human.id, round: game.round, turnId: game.turnId, action: 'hit' })} /></View>
-        </View>
         <View style={s.handArea}><Hand cards={human.hand} width={cardWidth} /><Label style={[s.handLabel, compact && { fontSize: 12, marginTop: 7 }]}>{hidden ? 'YOUR HAND · ? POINTS' : human.status === 'bust' ? 'BUST · 0 POINTS' : human.status === 'quit' ? `BANKED · ${human.roundScore} POINTS` : `YOUR HAND · ${score.total} POINT${score.total === 1 ? '' : 'S'}`}</Label></View>
       </View>
     </View>
@@ -125,11 +121,20 @@ export function GameTable({ session, onLeave, tableControls }: { session: GameSe
       </Label>
     </View>
     </ScrollView>
+    <View style={s.actionDock}>
+      {multiplayer && (!multiplayer.connected || multiplayer.error) && <Label accessibilityLiveRegion="polite" style={s.connectionNotice}>{multiplayer.error ?? 'Reconnecting…'}</Label>}
+        <View style={s.turnLine}><View style={[s.dot, { backgroundColor: canAct ? colors.lime : colors.muted }]} /><Label style={s.turnText}>{finished ? 'ROUND COMPLETE' : pending ? active.id === human.id ? 'YOUR CHOICE' : `${active.name.toUpperCase()} IS CHOOSING` : canAct ? 'YOUR TURN' : `${active.name.toUpperCase()}'S TURN`}</Label>{!finished && <Label style={{ color: !unlimited && canAct && seconds < 2 ? colors.coral : colors.lime, fontSize: unlimited ? 12 : compact ? 16 : 22 }}>{unlimited ? 'UNLIMITED' : `${seconds.toFixed(1)}s`}</Label>}</View>
+        {game.config.turnMs !== null && <View style={s.timerTrack}><View style={[s.timerFill, { width: `${Math.min(100, seconds * 1000 / game.config.turnMs * 100)}%` }]} /></View>}
+        <View style={[s.actionRow, mobile && { gap: 32 }]}>
+          <View style={s.action}><Button label={mustHit(game, human.id) ? `ALL-IN (${human.hand.length}/7)` : "QUIT"} tone="coral" disabled={!canAct || mustHit(game, human.id)} onPress={() => session.submit({ playerId: human.id, round: game.round, turnId: game.turnId, action: 'quit' })} /></View>
+          <View style={s.action}><Button label={game.special?.dailyDouble.includes(human.id) ? 'HIT ×2' : 'HIT'} tone="lime" disabled={!canAct} onPress={() => session.submit({ playerId: human.id, round: game.round, turnId: game.turnId, action: 'hit' })} /></View>
+        </View>
+    </View>
     {bonus && !hidden && !finished && <BonusToast key={bonus.id} messages={bonus.messages} onDismiss={dismissBonus} />}
     {(panel !== null || finished) && <Modal visible transparent animationType="fade" onRequestClose={() => setPanel(null)}>
       <View style={s.scrim}><View style={[s.panel, { width: panel === 'scores' ? 1000 : 620, maxHeight: height - 28, maxWidth: width - 28 }]}>
         <ScrollView contentContainerStyle={s.panelContent}>
-          {panel === 'manage' ? <>{tableControls}<Button label="BACK TO GAME" onPress={() => setPanel(null)} /></> : panel === 'leave' ? <><Label style={s.panelTitle}>Leave the table?</Label><Label style={s.panelText}>{multiplayer ? 'A bot will finish your current round.' : 'This local match will be lost.'}</Label><Button label="KEEP PLAYING" onPress={() => setPanel(null)} tone="lime" /><Button label="LEAVE MATCH" onPress={onLeave} tone="coral" /></>
+          {panel === 'manage' ? <>{multiplayer && <Label selectable>CODE: {multiplayer.joinCode}</Label>}{tableControls}<Button label="BACK TO GAME" onPress={() => setPanel(null)} /></> : panel === 'leave' ? <><Label style={s.panelTitle}>Leave the table?</Label><Label style={s.panelText}>{multiplayer ? 'A bot will finish your current round.' : 'This local match will be lost.'}</Label><Button label="KEEP PLAYING" onPress={() => setPanel(null)} tone="lime" /><Button label="LEAVE MATCH" onPress={onLeave} tone="coral" /></>
           : inspected ? <><Label style={s.panelTitle}>{inspected.name}'s hand</Label><Hand cards={inspected.hand} width={compact ? 48 : 66} /><Label style={s.panelText}>{hidden ? 'Points hidden' : inspected.status === 'bust' ? 'Busted · 0 points' : `${scoreCards(inspected.hand).total} points in hand`}</Label><Button label="BACK TO TABLE" onPress={() => setPanel(null)} /></>
           : !hidden && (panel === 'scores' || panel === 'deck') ? <>
             <View style={s.panelTop}><Label style={s.panelTitle}>{panel === 'scores' ? 'Scoreboard' : 'The remaining deck'}</Label><Button label={panel === 'scores' ? 'DECK →' : '← SCORES'} small onPress={() => setPanel(panel === 'scores' ? 'deck' : 'scores')} /></View>
@@ -137,9 +142,11 @@ export function GameTable({ session, onLeave, tableControls }: { session: GameSe
               : <DeckInventory deck={game.deck} decksAdded={game.decksAdded} />}
             <Button label="BACK TO TABLE" onPress={() => setPanel(null)} />
           </> : finished ? <>
-            <Label style={s.centerEyebrow}>{game.phase === 'game-over' ? 'THAT’S A WRAP' : `ROUND ${game.round} COMPLETE`}</Label>
-            <Label style={s.panelTitle}>{game.phase === 'game-over' ? game.winnerIds.includes(human.id) ? game.winnerIds.length > 1 ? 'A shared victory!' : 'You win!' : `${game.players.find(p => p.id === game.winnerIds[0])?.name} wins!` : human.status === 'bust' ? 'Luck ran out.' : 'Points in the bank.'}</Label>
+            {game.phase === 'game-over' ? <MatchResults game={game} localPlayerId={human.id} /> : <>
+            <Label style={s.centerEyebrow}>{`ROUND ${game.round} COMPLETE`}</Label>
+            <Label style={s.panelTitle}>{human.status === 'bust' ? 'Luck ran out.' : 'Points in the bank.'}</Label>
             {game.players.map(p => <View key={p.id} style={s.resultRow}><Label>{p.name}</Label><Label style={{ color: p.status === 'bust' ? colors.coral : colors.lime }}>{p.status === 'bust' ? 'BUST' : `+${p.roundScore}`}</Label><Label>{p.total} TOTAL</Label></View>)}
+            </>}
             {(!multiplayer || multiplayer.isHost) ? <Button label={game.phase === 'game-over' ? 'PLAY AGAIN' : 'NEXT ROUND →'} disabled={!!multiplayer && !multiplayer.connected} tone="lime" onPress={() => { if (game.phase === 'game-over' && !multiplayer) onLeave(); else session.advanceRound(); }} /> : <Label style={s.panelText}>Waiting for the host to start the next round.</Label>}
             {multiplayer && <><Label style={s.panelText}>{multiplayer.error ?? (!multiplayer.connected ? 'Reconnecting…' : '')}</Label><Button label="LEAVE TABLE" small onPress={onLeave} /></>}
             {tableControls && <Button label="TABLE / PLAYERS" onPress={() => setPanel('manage')} />}
@@ -153,6 +160,8 @@ export function GameTable({ session, onLeave, tableControls }: { session: GameSe
 const s = StyleSheet.create({
   silverBonus: { color: '#e2e8f0', textShadowColor: '#c0c0c0', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 6 },
   goldBonus: { color: '#ffd700', textShadowColor: '#e6ad24', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 6 },
+  actionDock: { flexShrink: 0, backgroundColor: colors.table, borderTopWidth: 1, borderColor: colors.line, paddingHorizontal: 12, paddingVertical: 10, gap: 8 },
+  connectionNotice: { color: colors.coral, fontSize: 12, textAlign: 'center' },
   tableScroll: { flex: 1, minHeight: 0 }, tableContent: { flexGrow: 1 },
   mobileHeader: { flexDirection: 'column', alignItems: 'stretch', paddingHorizontal: 16, gap: 12 },
   mobileHeaderRight: { justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' },

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { Sessions, type Peer } from '../src/sessions';
 import { parseRequest, RequestError } from '../src/protocol';
-import { ALL_SPECIAL_CARDS, specialCardId } from '../../hoq-fe/src/game/specials/selection';
+import { ALL_SPECIAL_CARDS, DEFAULT_SPECIAL_CARDS, specialCardId } from '../../hoq-fe/src/game/specials/selection';
 import type { GameCard, SpecialCardId } from '../../hoq-fe/src/game/types';
 
 class Client implements Peer {
@@ -17,6 +17,34 @@ function request(registry: Sessions, peer: Client, type: string, payload = {}, r
 }
 const config = (enabledSpecials?: readonly SpecialCardId[]) => ({ target: 50, turnMs: null, enabledSpecials });
 const specials = (cards: GameCard[]) => cards.filter(card => card.kind !== 'standard').map(specialCardId).sort();
+
+test('new-card tables preserve mathematical choices on resume', () => {
+  const registry = new Sessions(); const host = new Client(), guest = new Client();
+  const modern = (peer: Client, type: string, payload: object) => registry.handle(peer, parseRequest({ type, payload, requestId: randomUUID() }));
+  try {
+    modern(host, 'session.create', { playerId: host.id, name: 'Host', config: config() });
+    const session = [...registry.sessionsById.values()][0];
+    assert.ok(session.config.enabledSpecials!.includes('all-in'));
+    assert.ok(!session.config.enabledSpecials!.includes('war'));
+    modern(guest, 'session.join', { playerId: guest.id, name: 'Guest', joinCode: session.joinCode });
+    request(registry, host, 'round.start');
+    session.game!.deck = [{ id: 'math', kind: 'special', special: 'mathematical' }];
+    session.game!.decksAdded = 2;
+    request(registry, host, 'player.action', { action: 'hit', round: session.game!.round, turnId: session.game!.turnId });
+    const pending = host.state().game.special.pending;
+    assert.equal(pending.options.length, 4);
+    assert.deepEqual(pending.job.data, {});
+    registry.disconnect(host);
+    const restored = new Client();
+    modern(restored, 'session.resume', { playerId: host.id, sessionId: session.id });
+    assert.deepEqual(restored.state().game.special.pending, pending);
+    const action = { action: 'choose', round: session.game!.round, turnId: session.game!.turnId, choiceId: pending.id, optionId: pending.options[0].id };
+    const id = request(registry, restored, 'player.action', action);
+    const after = JSON.stringify(session.game);
+    request(registry, restored, 'player.action', action, id);
+    assert.equal(JSON.stringify(session.game), after);
+  } finally { registry.dispose(); }
+});
 
 test('protocol accepts absent, all, none, and subsets; rejects malformed selections for create and configure', () => {
   for (const type of ['session.create', 'session.configure']) {
@@ -80,13 +108,13 @@ test('host choices broadcast, remain locked during a match, refill correctly, su
   } finally { registry.dispose(); }
 });
 
-test('older clients omitting the field still receive a full 67-card deck', () => {
+test('omitting the selection uses the default 67-card deck', () => {
   const registry = new Sessions(); const host = new Client(), guest = new Client();
   try {
     request(registry, host, 'session.create', { playerId: host.id, name: 'Host' });
     const session = [...registry.sessionsById.values()][0];
     request(registry, guest, 'session.join', { playerId: guest.id, name: 'Guest', joinCode: session.joinCode });
-    assert.deepEqual(guest.state().config.enabledSpecials, ALL_SPECIAL_CARDS);
+    assert.deepEqual(guest.state().config.enabledSpecials, DEFAULT_SPECIAL_CARDS);
     request(registry, host, 'round.start');
     assert.equal(session.game!.deck.length + session.game!.players.length, 67);
   } finally { registry.dispose(); }

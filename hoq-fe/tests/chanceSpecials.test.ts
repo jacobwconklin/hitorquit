@@ -30,7 +30,7 @@ test('each fun deck contains one of every selected special, all four suit blanks
   assert.equal(deck.length, 67);
   assert.equal(new Set(deck.map(c => c.id)).size, 67);
   assert.equal(deck.filter(c => c.kind === 'standard').length, 52);
-  const expected: SpecialId[] = ['daily-double', 'musical-chairs', 'even-or-odd', 'draw-three', 'steal-card', 'blindfold', 'ransom', 'booby-trap', 'war', 'chicken'];
+  const expected: SpecialId[] = ['all-in', 'mathematical', 'daily-double', 'even-or-odd', 'draw-three', 'steal-card', 'blindfold', 'ransom', 'booby-trap', 'chicken'];
   for (const id of expected) assert.equal(deck.filter(c => c.kind === 'special' && c.special === id).length, 1);
   for (const suit of SUITS) assert.equal(deck.filter(c => c.kind === 'blank' && c.suit === suit).length, 1);
   assert.equal(deck.filter(c => c.kind === 'rainbow').length, 1);

@@ -40,7 +40,7 @@ test('100 seeded full fun matches preserve every physical card, finish, and deal
       state = applySpecialCommand(state, botCommand(state, random), random).state;
       assert.notEqual(JSON.stringify(state), before, `seed ${seed}: decision did not advance`);
       const cards = allCards(state);
-      cards.filter(c => c.id.startsWith('war-reward-')).forEach(c => rewards.add(c.id));
+      cards.filter(c => (c.id.startsWith('war-reward-') || c.id.startsWith('mathematical-'))).forEach(c => rewards.add(c.id));
       const expected = new Set([...createFunDeck().map(c => c.id), ...rewards]);
       if (state.decksAdded === 2) createFunDeck().forEach(c => expected.add(`deck-2:${c.id}`));
       assert.equal(cards.length, expected.size, `seed ${seed} step ${steps}: physical card count`);
@@ -154,10 +154,10 @@ class Clock implements Scheduler {
     this.time = end;
   }
 }
-function timedSession(clock: Clock) {
+function timedSession(clock: Clock, special = 'booby-trap', turnMs: number | null = config.turnMs) {
   const deck = createFunDeck();
-  const first = ['spades-2', 'spades-3', 'spades-4', 'special-booby-trap'];
-  return createFunLocalSession({ seats, config, scheduler: clock, random: () => 0.999999, rules: { ...funRules,
+  const first = ['spades-2', 'spades-3', 'spades-4', `special-${special}`];
+  return createFunLocalSession({ seats, config: { ...config, turnMs }, scheduler: clock, random: () => 0.999999, rules: { ...funRules,
     createDeck: () => [...first.map(id => deck.find(c => c.id === id)!), ...deck.filter(c => !first.includes(c.id))],
   } });
 }
@@ -190,4 +190,23 @@ test('fun session rejects stale choice tokens and resolves late valid choices us
   assert.equal(session.getSnapshot().game.turnId, 2); assert.equal(session.getSnapshot().deadline, 20000);
   assert.equal(session.getSnapshot().game.special!.pending, undefined);
   session.dispose();
+});
+
+
+test('Mathematical uses only the ordinary choice deadline and unlimited creates no timer', () => {
+  for (const turnMs of [10000, 30000, null]) {
+    const clock = new Clock(); const session = timedSession(clock, 'mathematical', turnMs);
+    try {
+      session.submit(action(session.getSnapshot().game, 'hit'));
+      const before = session.getSnapshot();
+      assert.equal(before.game.special!.pending!.special, 'mathematical');
+      assert.equal(before.deadline, turnMs);
+      assert.equal(clock.tasks.size, turnMs === null ? 0 : 1);
+      session.resume();
+      assert.equal(session.getSnapshot().deadline, before.deadline);
+      assert.deepEqual(session.getSnapshot().game.special!.pending, before.game.special!.pending);
+      clock.advance(turnMs ?? 100000);
+      assert.equal(!!session.getSnapshot().game.special!.pending, turnMs === null);
+    } finally { session.dispose(); }
+  }
 });

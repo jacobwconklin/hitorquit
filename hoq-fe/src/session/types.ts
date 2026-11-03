@@ -2,6 +2,8 @@ import type { Card, Command, GameEvent, GameState, GameCard } from '../game/type
 export interface Snapshot<C extends Card = GameCard> {
   game: GameState<C>; deadline: number | null; events: GameEvent[];
   localPlayerId?: string;
+  /** Remote countdown expiration on this device's performance.now() clock. */
+  countdownDeadline?: number;
   multiplayer?: { isHost: boolean; connected: boolean; joinCode: string; disconnectedNames?: string[]; error?: string };
 }
 export interface GameSession<C extends Card = GameCard> {

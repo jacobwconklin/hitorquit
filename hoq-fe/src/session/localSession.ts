@@ -5,6 +5,7 @@ import type { Card, Command, Config, GameEvent, Rules, Seat } from '../game/type
 import type { GameSession, Scheduler, Snapshot } from './types';
 import { createFunLocalSession } from './funLocalSession';
 import type { GameCard } from '../game/types';
+import { createBotTiming } from './botTiming';
 
 const realScheduler: Scheduler = { now: Date.now, schedule: (fn, ms) => { const id = setTimeout(fn, ms); return () => clearTimeout(id); } };
 export function createLocalSession<C extends Card>(options: {
@@ -12,6 +13,7 @@ export function createLocalSession<C extends Card>(options: {
 }): GameSession<C> {
   if (options.rules.apply) return createFunLocalSession(options as unknown as Parameters<typeof createFunLocalSession>[0]) as unknown as GameSession<C>;
   const { seats, config, rules, bot, random = Math.random, scheduler = realScheduler } = options;
+  const botTiming = createBotTiming(() => scheduler.now());
   const freshDeck = () => shuffle(rules.createDeck(config), random);
   let snapshot: Snapshot<C> = { game: createGame(seats, config, freshDeck()), deadline: null, events: [] };
   let disposed = false;
@@ -30,7 +32,7 @@ export function createLocalSession<C extends Card>(options: {
   }
   function scheduleTurn() {
     cancel();
-    if (disposed || snapshot.game.phase !== 'playing') return;
+    if (disposed || snapshot.game.phase !== 'playing') { botTiming.reset(); return; }
     const game = snapshot.game;
     const player = game.players[game.activeIndex];
     const command = { playerId: player.id, turnId: game.turnId };
@@ -42,8 +44,8 @@ export function createLocalSession<C extends Card>(options: {
     if (player.controller === 'bot') {
       // Inventory is sorted, so policy never receives the future draw order.
       const remainingCards = [...game.deck].sort((a, b) => a.id.localeCompare(b.id));
-      cancellations.push(scheduler.schedule(() => submit({ ...command, action: bot({ player, remainingCards }, random) }), turnMs === null ? 1100 : Math.min(1100, turnMs * 0.6)));
-    }
+      cancellations.push(scheduler.schedule(() => submit({ ...command, action: bot({ player, remainingCards }, random) }), botTiming.delay(turnMs)));
+    } else botTiming.reset();
   }
   scheduleTurn();
   return {

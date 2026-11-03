@@ -1,3 +1,4 @@
+import { MatchResults } from './MatchResults';
 import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import { AppState, Platform, ScrollView, View } from 'react-native';
 import type { RemoteSession } from '../session/remoteSession';
@@ -6,7 +7,7 @@ import { Button, Label } from './components';
 import { RuleControls } from './RuleControls';
 import { colors } from './theme';
 import { SpecialCardGuide } from './SpecialCardGuide';
-import { ALL_SPECIAL_CARDS } from '../game/specials/selection';
+import { DEFAULT_SPECIAL_CARDS } from '../game/specials/selection';
 import { CustomizationPanel, AppearanceNotice } from './CustomizationPanel';
 import { HowToPlay } from './HowToPlay';
 
@@ -53,25 +54,21 @@ export function MultiplayerRoom({ session, onLeave }: { session: RemoteSession; 
   if (playing) return <GameTable session={session} onLeave={onLeave} tableControls={controls} />;
   return <>
     <ScrollView contentContainerStyle={{ padding: 24, gap: 20, width: '100%', maxWidth: 800, alignSelf: 'center' }}>
-      <Label style={{ fontSize: 32 }}>HIT or QUIT</Label>
-      <Label style={{ fontSize: 24 }}>{state.game ? 'Game complete · Play again' : 'Your multiplayer table'}</Label>
+      {state.game?.phase === 'game-over' && <MatchResults game={state.game} localPlayerId={state.seatId} />}
+      <Label style={{ fontSize: 32 }}>{state.game ? 'Another hand?' : 'HIT or QUIT'}</Label>
+      <Label style={{ fontSize: 24 }}>{state.game ? 'Make it a rematch. Choose your next rules below.' : 'Your multiplayer table'}</Label>
       <Button label="CUSTOMIZE CARDS & FONT" onPress={() => setCustomizing(true)} />
       <AppearanceNotice />
       <Label selectable style={{ color: colors.lime, fontSize: 24 }}>JOIN CODE: {state.joinCode || '…'}</Label>
       <Label>{host ? 'You are the host.' : `Host: ${state.members.find(m => m.seatId === state.hostSeatId)?.name ?? 'Connecting…'}`}</Label>
       {!state.connected && <Label>Not connected to the table.</Label>}
       {state.error && <Label accessibilityLiveRegion="polite" style={{ color: colors.coral }}>{state.error}</Label>}
-      {state.events.map((event, i) => <Label key={i}>{event.message}</Label>)}
-      {state.game && <View style={{ gap: 8 }}>
-        <Label>FINAL SCORES</Label>
-        {state.game.players.map(player => <Label key={player.id}>{player.name}: {player.total} points{state.game!.winnerIds.includes(player.id) ? ' · WINNER' : ''}</Label>)}
-      </View>}
       {controls}
       <Label style={{ fontSize: 24 }}>House Rules</Label>
       {host ? <RuleControls config={state.config} disabled={!state.connected || state.configuring} onChange={session.configure} /> : <Label>First to {state.config.target} · {state.config.turnMs === null ? 'Unlimited turns' : `${state.config.turnMs / 1000} seconds per turn`}</Label>}
       {host ? <Button label={state.game ? 'PLAY AGAIN' : 'START GAME'} tone="lime" disabled={!state.connected || state.configuring || state.members.length < 2} onPress={session.advanceRound} /> : <Label>Customize your cards while the host chooses rules and starts the next game.</Label>}
       <HowToPlay />
-      <SpecialCardGuide selection={{ enabled: state.config.enabledSpecials ?? ALL_SPECIAL_CARDS, onChange: host ? enabledSpecials => session.configure({ ...state.config, enabledSpecials }) : undefined, disabled: !state.connected || state.configuring }} />
+      <SpecialCardGuide selection={{ enabled: state.config.enabledSpecials ?? DEFAULT_SPECIAL_CARDS, onChange: host ? enabledSpecials => session.configure({ ...state.config, enabledSpecials }) : undefined, disabled: !state.connected || state.configuring }} />
     </ScrollView>
     {customizing && <CustomizationPanel onClose={() => setCustomizing(false)} />}
   </>;

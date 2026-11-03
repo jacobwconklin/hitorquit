@@ -407,3 +407,7 @@ Record playtest observations: how often each selected card is drawn, has no lega
 | 2026-09-24 | Reject Double Dog Dare, Split Decision, Counterfeit, and original point-awarding Chicken; prefer fewer extra-point mechanics. Bounty remains unselected. | Selection feedback recorded; old preset superseded as a recommendation. |
 
 For each accepted card, retain its stable ID, exact effect, legal selections, timing/expiry, stacking, no-target/timeout behavior, deck count, score interactions, and acceptance cases here. Change the rule definition once and verify both execution modes against it.
+
+## Accepted revision — 2026-11-02
+
+All-in and Mathematical are implemented in the shared Solo/multiplayer engine; see [implemented_specials.md](implemented_specials.md) for current rules. Mathematical replaces the earlier equation input proposal with four generated suit-linked equations. It uses the ordinary configurable choice timer, including unlimited. WAR and Musical Chairs remain available but are disabled by default and appear last in the guide with a large-party slowdown note.

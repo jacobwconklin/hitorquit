@@ -1,3 +1,4 @@
+import { mustHit } from './allIn';
 import { cardOptions, effect, playerOptions, type Job, type SpecialDefinition } from './contracts';
 
 export const chicken: SpecialDefinition = {
@@ -41,7 +42,7 @@ export const chicken: SpecialDefinition = {
       ctx.ask(effect(job.special, job.actorId, { stage: 'pick', participants, choices, chooser }), chooser,
         'Chicken: secretly choose Hit or Quit. Quitting banks your hand after any penalty.', [
           { label: `Hit (${ctx.hitCount(chooser)} card${ctx.hitCount(chooser) === 1 ? '' : 's'})`, value: 'hit' },
-          { label: 'Quit', value: 'quit' },
+          ...(!mustHit(ctx.state, chooser) ? [{ label: 'Quit', value: 'quit' }] : []),
         ]);
       return;
     }

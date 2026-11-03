@@ -4,7 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { funRules } from './src/game/specials/framework';
 import type { GameCard, SpecialCardId } from './src/game/types';
-import { ALL_SPECIAL_CARDS } from './src/game/specials/selection';
+import { DEFAULT_SPECIAL_CARDS } from './src/game/specials/selection';
 import type { BotPolicy } from './src/game/bots';
 import { BOT_COUNTS, TURN_OPTIONS, createLocalSeats } from './src/game/setup';
 import { createLocalSession } from './src/session/localSession';
@@ -20,6 +20,7 @@ import { createRemoteSession, type RemoteSession, type Socket } from './src/sess
 import { identityStore, backendUrl } from './src/session/platformStorage';
 import type { Identity } from './src/session/identityStore';
 import { randomUUID } from 'expo-crypto';
+import { checkBackend } from './src/session/backendAvailability';
 import { MultiplayerRoom } from './src/ui/MultiplayerRoom';
 
 export default function App() {
@@ -35,7 +36,7 @@ function Home() {
   const [target, setTarget] = useState(30);
   const [seconds, setSeconds] = useState<number | null>(10);
   const [botCount, setBotCount] = useState(2);
-  const [enabledSpecials, setEnabledSpecials] = useState<SpecialCardId[]>(() => [...ALL_SPECIAL_CARDS]);
+  const [enabledSpecials, setEnabledSpecials] = useState<SpecialCardId[]>(() => [...DEFAULT_SPECIAL_CARDS]);
   const [mode, setMode] = useState<'solo' | 'host' | 'join'>('solo');
   const [remote, setRemote] = useState<RemoteSession | null>(null);
   const remoteRef = useRef<RemoteSession | null>(null);
@@ -44,12 +45,25 @@ function Home() {
   const [joinCode, setJoinCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [onlineError, setOnlineError] = useState('');
+  const [availability, setAvailability] = useState<'checking' | 'online' | 'offline'>('checking');
+  const [checkAttempt, setCheckAttempt] = useState(0);
   useEffect(() => {
     let mounted = true;
-    void identityStore.load().then(value => { if (mounted) { setSaved(value); if (value.sessionId) void online(true); } }).catch(() => { if (mounted) setOnlineError('Session storage is unavailable. Solo play is still available.'); });
+    const probe = checkBackend(backendUrl(), url => new WebSocket(url) as unknown as Socket);
+    void probe.result.then(available => {
+      if (!mounted) return;
+      setAvailability(available ? 'online' : 'offline');
+      if (!available) setMode('solo');
+    });
+    return () => { mounted = false; probe.cancel(); };
+  }, [checkAttempt]);
+  useEffect(() => {
+    let mounted = true;
+    void identityStore.load().then(value => { if (mounted) { setSaved(value); } }).catch(() => { if (mounted) setOnlineError('Session storage is unavailable. Solo play is still available.'); });
     return () => { mounted = false; remoteRef.current?.dispose(); };
   }, []);
   async function online(resume = false) {
+    if (availability !== 'online') return;
     setBusy(true); setOnlineError('');
     try {
       const identity = await identityStore.load();
@@ -79,13 +93,15 @@ function Home() {
   function leave() { sessionRef.current?.dispose(); sessionRef.current = null; setSession(null); }
   return <SafeAreaProvider><SafeAreaView style={s.root}><StatusBar hidden />
     {remote ? <MultiplayerRoom session={remote} onLeave={() => { void leaveOnline(); }} /> : session ? <GameTable session={session} onLeave={leave} /> : <>
-    <View style={s.modeBar}>{(['solo', 'host', 'join'] as const).map(value => <Button key={value} label={value.toUpperCase()} selected={mode === value} tone={mode === value ? 'lime' : 'cream'} onPress={() => setMode(value)} />)}</View>
+    <View style={s.modeBar}>{(['solo', 'host', 'join'] as const).map(value => <Button key={value} label={value.toUpperCase()} selected={mode === value} disabled={value !== 'solo' && availability !== 'online'} tone={mode === value ? 'lime' : 'cream'} onPress={() => setMode(value)} />)}</View>
     <ScrollView style={s.setupScroll} contentContainerStyle={[s.homeContent, mobile && s.homeContentMobile]}>
       <View style={[s.setup, mobile && s.setupMobile]}>
       <View style={[s.intro, mobile && s.mobileSection]}><Label style={[s.logo, mobile && { fontSize: 40 }]}>HIT <Label style={s.or}>or</Label> QUIT</Label>
         <View style={s.sample}><PlayingCard card={{ id: 'sample-a', kind: 'standard', rank: 1, suit: 'spades' }} width={60} /><PlayingCard card={{ id: 'sample-k', kind: 'standard', rank: 13, suit: 'hearts' }} width={60} /><PlayingCard width={60} /></View>
         <Button label="CUSTOMIZE CARDS & FONT" onPress={() => setCustomizing(true)} />
         <AppearanceNotice />
+        {availability !== 'online' && <Label accessibilityLiveRegion="polite" style={s.rules}>{availability === 'checking' ? 'Checking connection… Solo play is ready.' : "Can't connect to the backend. Offline mode — only solo play is available."}</Label>}
+        {availability === 'offline' && <Button label="RETRY CONNECTION" onPress={() => { setAvailability('checking'); setCheckAttempt(value => value + 1); }} />}
       </View>
       <View style={[s.setupPanel, mobile && [s.mobileSection, s.mobilePanel]]}><Label style={s.panelTitle}>House Rules</Label>
         {mode !== 'solo' && <><Label style={s.fieldLabel}>YOUR NAME</Label><TextInput accessibilityLabel="Your name" style={[s.input, { fontFamily }]} value={name} onChangeText={setName} maxLength={40} />{mode === 'join' && <><Label style={s.fieldLabel}>JOIN CODE</Label><TextInput accessibilityLabel="Join code" style={[s.input, { fontFamily }]} value={joinCode} onChangeText={value => setJoinCode(value.toUpperCase())} maxLength={6} autoCapitalize="characters" autoCorrect={false} /></>}</>}
@@ -94,8 +110,8 @@ function Home() {
         <Label style={s.fieldLabel}>TIME PER TURN</Label><View style={[s.choices, mobile && s.mobileChoices]}>{TURN_OPTIONS.map(value => <Button key={value ?? 'unlimited'} label={value === null ? 'UNLIMITED' : `${value} SEC`} small={!mobile} tone={seconds === value ? 'lime' : 'cream'} onPress={() => setSeconds(value)} />)}</View>
         </>}
         {mode === 'solo' && <><Label style={s.fieldLabel}>NUMBER OF BOTS</Label><View style={s.choices}>{BOT_COUNTS.map(value => <View key={value} style={mobile && s.mobileBotOption}><Button label={`${value}`} small={!mobile} tone={botCount === value ? 'lime' : 'cream'} onPress={() => setBotCount(value)} /></View>)}</View></>}
-        {mode === 'solo' ? <Button label="DEAL ME IN →" tone="lime" onPress={start} /> : <Button label={busy ? 'CONNECTING…' : mode === 'host' ? 'CREATE TABLE' : 'JOIN TABLE'} tone="lime" disabled={busy || !name.trim() || (mode === 'join' && joinCode.length !== 6)} onPress={() => { void online(); }} />}
-        {saved?.sessionId && <Button label="REJOIN SAVED TABLE" disabled={busy} onPress={() => { void online(true); }} />}
+        {mode === 'solo' ? <Button label="DEAL ME IN →" tone="lime" onPress={start} /> : <Button label={busy ? 'CONNECTING…' : mode === 'host' ? 'CREATE TABLE' : 'JOIN TABLE'} tone="lime" disabled={availability !== 'online' || busy || !name.trim() || (mode === 'join' && joinCode.length !== 6)} onPress={() => { void online(); }} />}
+        {saved?.sessionId && <Button label="REJOIN SAVED TABLE" disabled={busy || availability !== 'online'} onPress={() => { void online(true); }} />}
         {!!onlineError && <Label style={s.rules}>{onlineError}</Label>}
       </View>
       </View>

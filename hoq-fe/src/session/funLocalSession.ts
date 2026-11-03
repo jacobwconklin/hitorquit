@@ -5,11 +5,13 @@ import { decisionActor, decisionKey, fallbackCommand, validCommand } from '../ga
 import { botCommand, projectEvents, projectGame } from '../game/specials/view';
 import { copyMatchConfig } from '../game/specials/selection';
 import type { GameSession, Scheduler, Snapshot } from './types';
+import { createBotTiming } from './botTiming';
 
 export function createFunLocalSession(options: { seats: Seat[]; config: Config; rules: Rules<GameCard>; random?: () => number; scheduler?: Scheduler }): GameSession {
   const random = options.random ?? Math.random;
   const scheduler: Scheduler = options.scheduler ?? { now: Date.now, schedule(fn, ms) { const timer = setTimeout(fn, ms); return () => clearTimeout(timer); } };
   const config = copyMatchConfig(options.config);
+  const botTiming = createBotTiming(() => scheduler.now());
   const fresh = () => shuffle(options.rules.createDeck(config), random);
   let game = createGame(options.seats, config, fresh());
   const viewer = options.seats.find(s => s.controller === 'human')?.id ?? options.seats[0].id;
@@ -23,14 +25,15 @@ export function createFunLocalSession(options: { seats: Seat[]; config: Config; 
   }
   function schedule() {
     cancel.forEach(fn => fn()); cancel = []; deadline = null;
-    if (disposed || game.phase !== 'playing') return;
+    if (disposed || game.phase !== 'playing') { botTiming.reset(); return; }
     const key = decisionKey(game);
     const run = (fn: () => Command) => { if (!disposed && key === decisionKey(game)) submit(fn()); };
     if (game.config.turnMs !== null) {
       deadline = scheduler.now() + game.config.turnMs;
       cancel.push(scheduler.schedule(() => run(() => fallbackCommand(game)), game.config.turnMs));
     }
-    if (game.players.find(p => p.id === decisionActor(game))?.controller === 'bot') cancel.push(scheduler.schedule(() => run(() => botCommand(game, random)), 1100));
+    if (game.players.find(p => p.id === decisionActor(game))?.controller === 'bot') cancel.push(scheduler.schedule(() => run(() => botCommand(game, random)), botTiming.delay(game.config.turnMs)));
+    else botTiming.reset();
   }
   function submit(command: Command) {
     if (disposed || !validCommand(game, command)) return;

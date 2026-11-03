@@ -5,7 +5,7 @@ import { definitions } from './registry';
 export interface SpecialGuideEntry { card: GameCard; name: string; description: string }
 // Action explanations share the live game's definitions; passive cards have no effect resolver.
 export const specialGuide: SpecialGuideEntry[] = [
-  ...Object.values(definitions).map(definition => ({
+  ...Object.values(definitions).filter(d => d.id !== 'war' && d.id !== 'musical-chairs').map(definition => ({
     card: { id: `guide-${definition.id}`, kind: 'special' as const, special: definition.id },
     name: definition.name, description: definition.description,
   })),
@@ -18,4 +18,8 @@ export const specialGuide: SpecialGuideEntry[] = [
     description: 'An Ace of every suit. Counts as one card and helps any flush or an Ace-low or Ace-high straight. Another Ace makes a pair and busts your hand.' },
   { card: { id: 'guide-all-suit', kind: 'blank', suit: 'all' }, name: 'All-Suit Blank',
     description: 'A reward created for the winner of WAR; it is not in the starting deck. Counts as one card and helps any flush. With no rank, it cannot form a pair or contribute to a straight.' },
+  ...(['musical-chairs', 'war'] as const).map(id => ({
+    card: { id: `guide-${id}`, kind: 'special' as const, special: id },
+    name: definitions[id].name, description: `${definitions[id].description} Disabled by default: can slow down large games.`,
+  })),
 ];

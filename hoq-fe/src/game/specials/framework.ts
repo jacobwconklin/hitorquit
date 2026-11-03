@@ -1,3 +1,5 @@
+import { mustHit } from './allIn';
+import { roundResult } from '../results';
 import type { Command, Config, GameCard, Rules, Transition } from '../types';
 import { shuffle, standardRules, SUITS } from '../standardRules';
 import { type EffectContext, type FunState, type Job, type SpecialState, effect } from './contracts';
@@ -24,12 +26,14 @@ export function validCommand(state: FunState, command: Command): boolean {
   if (state.phase !== 'playing' || command.turnId !== state.turnId || (command.round !== undefined && command.round !== state.round) || command.playerId !== decisionActor(state)) return false;
   const pending = state.special?.pending;
   return pending ? command.action === 'choose' && command.choiceId === pending.id && pending.options.some(o => o.id === command.optionId)
-    : (command.action === 'hit' || command.action === 'quit') && state.players[state.activeIndex].status === 'playing';
+    : (command.action === 'hit' || command.action === 'quit' && !mustHit(state, command.playerId)) && state.players[state.activeIndex].status === 'playing';
 }
 export function applySpecialCommand(original: FunState, command: Command, random: () => number): Transition<GameCard> {
   if (!validCommand(original, command)) return { state: original, events: [] };
   const state: FunState = JSON.parse(JSON.stringify(original));
   state.special ??= emptySpecialState();
+  const trackHands = () => { for (const p of state.players) p.roundMaxHand = Math.max(p.roundMaxHand ?? 0, p.hand.length); };
+  trackHands();
   const s = state.special;
   const events: Transition<GameCard>['events'] = [];
   const ctx: EffectContext = {
@@ -46,6 +50,7 @@ export function applySpecialCommand(original: FunState, command: Command, random
     draw: (playerId, count) => { s.queue.unshift({ type: 'draw', playerId, count }); },
     hitCount: id => s.dailyDouble.includes(id) ? 2 : 1,
     settle(...ids) {
+      trackHands();
       // Settle all busts first; only surviving hands can claim thirteen.
       for (const id of new Set(ids)) {
         const p = ctx.player(id);
@@ -57,18 +62,22 @@ export function applySpecialCommand(original: FunState, command: Command, random
         winners.forEach(id => ctx.bank(id)); state.phase = 'game-over'; state.winnerIds = winners;
         events.push({ type: 'win', message: `${winners.map(id => ctx.player(id).name).join(' and ')} reached 13 cards!` });
       }
+      s.allIn = s.allIn?.filter(id => ctx.player(id).status === 'playing' && ctx.player(id).hand.length < 7);
       s.blinded = s.blinded.filter(b => ctx.player(b.playerId).status === 'playing');
     },
     bank(id) {
+      trackHands();
       const p = ctx.player(id); if (p.status !== 'playing') return;
       p.status = 'quit'; p.roundScore = scoreCards(p.hand).total; p.total += p.roundScore;
       events.push({ type: 'bank', playerId: id, message: `${p.name} banked ${p.roundScore} points.` });
     },
     transfer(from, to, cardId) {
+      trackHands();
       const source = ctx.player(from), target = ctx.player(to);
       const i = source.hand.findIndex(c => c.id === cardId);
       if (i < 0) throw new Error('Card no longer belongs to source');
       target.hand.push(source.hand.splice(i, 1)[0]);
+      trackHands();
     },
   };
   function replenish() {
@@ -118,6 +127,7 @@ export function applySpecialCommand(original: FunState, command: Command, random
   while (s.queue.length && !s.pending && state.phase === 'playing') {
     if (++steps > 1000) throw new Error('Effect resolution exceeded finite deck limit');
     run(s.queue.shift()!);
+    trackHands();
   }
   if (!s.pending || state.phase !== 'playing') {
     const owner = state.players[state.activeIndex].id;
@@ -129,7 +139,7 @@ export function applySpecialCommand(original: FunState, command: Command, random
         state.winnerIds = highest >= state.config.target ? state.players.filter(p => p.total === highest).map(p => p.id) : [];
         state.phase = state.winnerIds.length ? 'game-over' : 'round-over';
       }
-      state.history.push({ round: state.round, scores: Object.fromEntries(state.players.map(p => [p.id, p.roundScore])) });
+      state.history.push(roundResult(state.round, state.players));
     } else {
       do { state.activeIndex = (state.activeIndex + 1) % state.players.length; } while (state.players[state.activeIndex].status !== 'playing');
     }

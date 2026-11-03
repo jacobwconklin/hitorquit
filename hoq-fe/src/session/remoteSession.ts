@@ -10,13 +10,15 @@ export interface Socket {
 export interface RemoteState {
   game: GameState<GameCard> | null; deadline: number | null; events: GameEvent[];
   revision: number; seatId?: string; hostSeatId?: string; joinCode: string; config: Config;
-  members: { seatId: string; name: string; connected: boolean; waiting: boolean; departed: boolean }[];
+  members: { seatId: string; name: string; connected: boolean; waiting: boolean; departed: boolean; bot?: boolean }[];
+  supportsBots?: boolean;
   maxPlayers: number; connected: boolean; configuring: boolean; error?: string;
 }
 export interface RemoteSession extends GameSession {
   getRemoteSnapshot(): RemoteState;
   configure(config: Config): void;
   kick(seatId: string): void;
+  addBot(): void;
   endGame(): void;
   leave(): Promise<void>;
 }
@@ -29,6 +31,7 @@ export function createRemoteSession(options: {
   let identity = { ...options.identity };
   let state: RemoteState = { game: null, deadline: null, events: [], revision: -1, joinCode: '', config: options.config, members: [], maxPlayers: 8, connected: false, configuring: false };
   let snapshot: Snapshot | undefined;
+  let countdownDeadline: number | undefined;
   let socket: Socket | undefined;
   let disposed = false; let terminal = false; let attempt = 0;
   let joined = options.mode === 'resume';
@@ -40,7 +43,7 @@ export function createRemoteSession(options: {
   const listeners = new Set<() => void>();
   function update(patch: Partial<RemoteState>) {
     state = { ...state, ...patch };
-    if (state.game) snapshot = { game: state.game, deadline: state.deadline, events: state.events, localPlayerId: state.seatId,
+    if (state.game) snapshot = { game: state.game, deadline: state.deadline, countdownDeadline, events: state.events, localPlayerId: state.seatId,
       multiplayer: { isHost: state.seatId === state.hostSeatId, connected: state.connected, joinCode: state.joinCode, disconnectedNames: state.members.filter(m => !m.connected).map(m => m.name), error: state.error } };
     listeners.forEach(fn => fn());
   }
@@ -74,8 +77,13 @@ export function createRemoteSession(options: {
         persist({ playerId: identity.playerId, sessionId: message.sessionId, endpoint: options.endpoint });
         update({ seatId: message.seatId, joinCode: message.joinCode, connected: true, error: undefined });
       } else if (message.type === 'session.state' && message.revision >= state.revision) {
+        // Anchor server time to a monotonic clock; device clock changes cannot freeze the display.
+        // Older servers omit serverNow, so retain their existing wall-clock behavior.
+        countdownDeadline = message.deadline !== null && Number.isFinite(message.serverNow)
+          ? performance.now() + Math.max(0, message.deadline - message.serverNow)
+          : undefined;
         update({ game: message.game, deadline: message.deadline, events: message.events, revision: message.revision,
-          config: message.config, members: message.members, hostSeatId: message.hostSeatId, maxPlayers: message.maxPlayers, joinCode: message.joinCode });
+          config: message.config, members: message.members, hostSeatId: message.hostSeatId, maxPlayers: message.maxPlayers, joinCode: message.joinCode, supportsBots: message.supportsBots === true });
       } else if (message.type === 'request.error') {
         if (message.requestId === configRequest) { configRequest = undefined; update({ configuring: false }); }
         update({ error: message.message });
@@ -109,6 +117,9 @@ export function createRemoteSession(options: {
     submit(command) { if (state.connected && state.game && command.playerId === state.seatId) send('player.action', { action: command.action, round: command.round ?? state.game.round, turnId: command.turnId, choiceId: command.choiceId, optionId: command.optionId }); },
     advanceRound() { if (state.connected && !state.configuring && state.hostSeatId === state.seatId) send('round.start'); },
     kick(seatId) { if (state.connected && state.hostSeatId === state.seatId) send('session.kick', { seatId }); },
+    addBot() {
+      if (state.connected && state.supportsBots && state.hostSeatId === state.seatId && (!state.game || state.game.phase === 'game-over') && state.members.length < state.maxPlayers) send('session.addBot');
+    },
     endGame() { if (state.connected && state.hostSeatId === state.seatId) send('game.end'); },
     configure(config) {
       if (state.connected && !state.configuring && state.hostSeatId === state.seatId && (!state.game || state.game.phase === 'game-over')) {

@@ -146,6 +146,6 @@ test('guide covers every nonstandard deck card plus the WAR reward, with live ac
   assert.ok(guideTypes.includes('blank-all'));
   for (const entry of specialGuide) {
     assert.ok(entry.description.length > 20);
-    if (entry.card.kind === 'special') assert.equal(entry.description, definitions[entry.card.special].description);
+    if (entry.card.kind === 'special') assert.ok(entry.description.startsWith(definitions[entry.card.special].description));
   }
 });

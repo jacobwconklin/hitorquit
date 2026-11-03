@@ -9,7 +9,7 @@ export interface PendingChoice { id: string; actorId: string; special: SpecialId
 export interface Trap { ownerId: string; rank: number }
 export interface SpecialState {
   serial: number; queue: Job[]; pending?: PendingChoice; discard: GameCard[];
-  dailyDouble: string[]; blinded: { playerId: string; appliedTurn: number }[]; traps: Trap[];
+  allIn?: string[]; dailyDouble: string[]; blinded: { playerId: string; appliedTurn: number }[]; traps: Trap[];
   last?: { special: SpecialId; message: string };
   lastCard?: GameCard;
 }

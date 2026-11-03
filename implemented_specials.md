@@ -1,7 +1,9 @@
 # Implemented specials
 
 - Available in Solo and multiplayer through the same engine, choice controls, and bot/timeout handling.
-- Each deck contains 52 normal cards plus **one of each below** (four separate suit blanks): **67 cards** total. Every round starts with one normal card per player. Once the draw pile falls below 13, shuffle in one complete second deck, including its specials; no third deck this round.
+- Each deck contains 52 normal cards plus **one of each enabled card below** (four separate suit blanks): **67 cards by default**, or **69 with all enabled**. WAR and Musical Chairs are off by default because they can slow down large parties. Every round starts with one normal card per player. Once the draw pile falls below 13, shuffle in one complete second deck, including its specials; no third deck this round.
+- **All-in:** choose an active player, including yourself. They must Hit on their turns and cannot Quit (including in Chicken) until they reach at least seven cards. Reaching seven removes the restriction; busting still ends their round. Repeated copies do not stack. Empty-deck banking still applies.
+- **Mathematical:** four randomly generated multiplication-minus-subtraction equations, one per suit, each yielding 1–13. Choose one to add a generated standard card of that rank and suit; duplicate ranks bust normally. Choices are generated once and survive reconnects. Uses only the existing match choice timer; unlimited means no timer.
 - **Daily Double:** choose a player, including yourself; their Hits draw two cards for the rest of the round. Repeated copies do not stack.
 - **Musical Chairs:** drawer chooses left/right; each participating player secretly selects one card, then all selected cards move together.
 - **Suit blanks — Spades, Clubs, Hearts, Diamonds:** rankless cards that count toward hand size, points, and their suit's flush; no rank pairs or straights.

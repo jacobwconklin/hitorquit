@@ -1,3 +1,4 @@
+import { roundResult } from './results';
 import type { Card, Command, Config, GameEvent, GameState, Rules, Seat, Transition } from './types';
 import { shuffle } from './standardRules';
 
@@ -12,7 +13,7 @@ export function createGame<C extends Card>(seats: Seat[], config: Config, deck: 
   });
   return {
     phase: 'playing', config: { ...config, ...(config.enabledSpecials === undefined ? {} : { enabledSpecials: [...config.enabledSpecials] }) }, round: 1, activeIndex: 0, turnId: 1, history: [], winnerIds: [],
-    players: seats.map((seat, i) => ({ ...seat, hand: [opening[i]], status: 'playing', total: 0, roundScore: 0 })),
+    players: seats.map((seat, i) => ({ ...seat, hand: [opening[i]], status: 'playing', total: 0, roundScore: 0, roundMaxHand: 1 })),
     deck: remaining, decksAdded: 1,
   };
 }
@@ -47,17 +48,18 @@ export function applyCommand<C extends Card>(state: GameState<C>, command: Comma
     }
     replenish();
   } else { player.status = 'quit'; type = 'quit'; }
+  player.roundMaxHand = Math.max(active.roundMaxHand ?? active.hand.length, player.hand.length);
   if (player.status === 'quit') { player.roundScore = rules.score(player.hand).total; player.total += player.roundScore; }
   const players = state.players.map((p, i) => i === state.activeIndex ? player : p);
   let next: GameState<C> = { ...state, players, deck, decksAdded, turnId: state.turnId + 1 };
   if (won) {
     next = { ...next, phase: 'game-over', winnerIds: [player.id],
-      history: [...state.history, { round: state.round, scores: Object.fromEntries(players.map(p => [p.id, p.roundScore])) }] };
+      history: [...state.history, roundResult(state.round, players)] };
   } else if (players.every(p => p.status !== 'playing')) {
     const highest = Math.max(...players.map(p => p.total));
     const winnerIds = highest >= state.config.target ? players.filter(p => p.total === highest).map(p => p.id) : [];
     next = { ...next, phase: winnerIds.length ? 'game-over' : 'round-over', winnerIds,
-      history: [...state.history, { round: state.round, scores: Object.fromEntries(players.map(p => [p.id, p.roundScore])) }] };
+      history: [...state.history, roundResult(state.round, players)] };
   } else {
     let index = state.activeIndex;
     do { index = (index + 1) % players.length; } while (players[index].status !== 'playing');
@@ -75,5 +77,5 @@ export function nextRound<C extends Card>(state: GameState<C>, deck: C[]): GameS
   return { ...state, round: state.round + 1, phase: 'playing', activeIndex: state.round % state.players.length,
     turnId: state.turnId + 1, deck: fresh.deck, decksAdded: 1,
     special: state.special ? { serial: state.special.serial + 1, queue: [], discard: [], dailyDouble: [], blinded: [], traps: state.special.traps, } : undefined,
-    players: state.players.map((p, i) => ({ ...p, hand: fresh.players[i].hand, status: 'playing', roundScore: 0 })) };
+    players: state.players.map((p, i) => ({ ...p, hand: fresh.players[i].hand, status: 'playing', roundScore: 0, roundMaxHand: 1 })) };
 }

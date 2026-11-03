@@ -19,6 +19,38 @@ function setup(options: ConstructorParameters<typeof Sessions>[0] = {}) {
   request(registry, b, 'session.join', { playerId: b.id, name: 'B', joinCode: session.joinCode });
   return { registry, a, b, session };
 }
+
+test('last active player gets fresh deadlines and server time after consecutive hits', () => {
+  let now = 100000;
+  const { registry, a, b, session } = setup({ now: () => now });
+  const c = new Client();
+  try {
+    request(registry, c, 'session.join', { playerId: c.id, name: 'C', joinCode: session.joinCode });
+    request(registry, a, 'session.configure', { config: { target: 30, turnMs: 10000, enabledSpecials: [] } });
+    request(registry, a, 'round.start');
+    const act = (client: Client, action: string) => request(registry, client, 'player.action', { action, round: 1, turnId: session.game!.turnId });
+    act(a, 'quit'); act(b, 'quit');
+    for (let i = 0; i < 2; i++) {
+      now += 3000;
+      const player = session.game!.players[2];
+      const ranks = player.hand.map(card => card.kind === 'standard' ? card.rank : 0);
+      const safe = session.game!.deck.findIndex(card => card.kind === 'standard' && !ranks.includes(card.rank));
+      session.game!.deck.unshift(session.game!.deck.splice(safe, 1)[0]);
+      act(c, 'hit');
+      assert.equal(session.game!.activeIndex, 2);
+      assert.equal(session.game!.phase, 'playing');
+      for (const client of [a, b, c]) {
+        const snapshot = client.messages.filter(m => m.type === 'session.state').at(-1);
+        assert.equal(snapshot.serverNow, now);
+        assert.equal(snapshot.deadline - snapshot.serverNow, 10000);
+      }
+    }
+    now += 2000;
+    request(registry, c, 'session.sync');
+    const snapshot = c.messages.filter(m => m.type === 'session.state').at(-1);
+    assert.equal(snapshot.deadline - snapshot.serverNow, 8000);
+  } finally { registry.dispose(); }
+});
 test('capacity is configurable; reconnect works when full and old socket close is harmless', () => {
   const { registry, a, b, session } = setup({ maxPlayers: 2 });
   try {
