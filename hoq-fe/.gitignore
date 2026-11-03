@@ -6,3 +6,6 @@ test-artifacts/
 .test-build/
 .native-check/
 *.log
+
+# Generated native iOS project; regenerate from app.json and config plugins.
+/ios/

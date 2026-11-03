@@ -12,7 +12,7 @@ async function until(check: () => boolean) {
   const end = Date.now() + 3000;
   while (!check()) { if (Date.now() > end) throw new Error('Timed out waiting for session state'); await new Promise(r => setTimeout(r, 5)); }
 }
-test('frontend adapters host, join, configure, play with solo parity, wait, reconnect, and transfer host', async () => {
+test('frontend adapters host, join, configure, play with solo parity, reject late joins, reconnect, and transfer host only on explicit leave', async () => {
   const backend = createBackend(); const remotes: RemoteSession[] = []; const sockets: WebSocket[] = [];
   await new Promise<void>(resolve => backend.server.listen(0, '127.0.0.1', resolve));
   const endpoint = `ws://127.0.0.1:${(backend.server.address() as { port: number }).port}/ws`;
@@ -48,11 +48,12 @@ test('frontend adapters host, join, configure, play with solo parity, wait, reco
       }
     } finally { solo.dispose(); }
     host.advanceRound(); await until(() => host.getSnapshot().game.round === 2);
-    const late = client('join', host.getRemoteSnapshot().joinCode); await until(() => late.getRemoteSnapshot().members.length === 3);
-    assert.equal(late.getRemoteSnapshot().game!.players.length, 2);
+    const late = client('join', host.getRemoteSnapshot().joinCode); await until(() => !!late.getRemoteSnapshot().error);
+    assert.match(late.getRemoteSnapshot().error!, /game has started/);
     const hostSeat = host.getRemoteSnapshot().seatId;
     sockets[0].terminate();
-    await until(() => host.getRemoteSnapshot().connected && host.getRemoteSnapshot().hostSeatId !== hostSeat);
+    await until(() => sockets.length >= 4 && host.getRemoteSnapshot().connected);
+    assert.equal(host.getRemoteSnapshot().hostSeatId, hostSeat);
     assert.equal(host.getRemoteSnapshot().seatId, hostSeat);
     assert.ok(saved?.sessionId);
     // Reload uses persisted private IDs and replaces the prior connection.
@@ -62,8 +63,56 @@ test('frontend adapters host, join, configure, play with solo parity, wait, reco
     const newHost = remotes.find(s => s.getRemoteSnapshot().connected && s.getRemoteSnapshot().seatId === s.getRemoteSnapshot().hostSeatId)!;
     const oldHostSeat = newHost.getRemoteSnapshot().seatId;
     await newHost.leave();
-    await until(() => restored.getRemoteSnapshot().hostSeatId !== oldHostSeat);
-    const eligible = restored.getRemoteSnapshot().members.filter(m => m.connected).map(m => m.seatId);
-    assert.ok(eligible.includes(restored.getRemoteSnapshot().hostSeatId!));
+    await until(() => joiner.getRemoteSnapshot().hostSeatId !== oldHostSeat);
+    const eligible = joiner.getRemoteSnapshot().members.filter(m => m.connected).map(m => m.seatId);
+    assert.ok(eligible.includes(joiner.getRemoteSnapshot().hostSeatId!));
+  } finally { remotes.forEach(s => s.dispose()); sockets.forEach(s => s.terminate()); await backend.close(); }
+});
+
+test('remote clients end, change rules, replay, restore and receive removal', async () => {
+  const backend = createBackend();
+  const remotes: RemoteSession[] = [];
+  const sockets: WebSocket[] = [];
+  const saved = new Map<string, Identity>();
+  await new Promise<void>(resolve => backend.server.listen(0, '127.0.0.1', resolve));
+  const endpoint = `ws://127.0.0.1:${(backend.server.address() as { port: number }).port}/ws`;
+  function client(name: string, mode: 'host' | 'join' | 'resume', joinCode?: string) {
+    const session = createRemoteSession({ name, mode, joinCode, endpoint, identity: saved.get(name) ?? { playerId: randomUUID() },
+      config: { target: 30, turnMs: null, enabledSpecials: [] }, uuid: randomUUID,
+      connect(url) { const socket = new WebSocket(url); sockets.push(socket); return socket as unknown as Socket; },
+      async save(value) { saved.set(name, value); }, retryMs: 5 });
+    remotes.push(session); return session;
+  }
+  try {
+    const host = client('Host', 'host'); await until(() => host.getRemoteSnapshot().connected);
+    const code = host.getRemoteSnapshot().joinCode;
+    const guest = client('Guest', 'join', code); await until(() => host.getRemoteSnapshot().members.length === 2);
+    const seat = guest.getRemoteSnapshot().seatId;
+    host.advanceRound(); await until(() => !!guest.getRemoteSnapshot().game);
+    host.endGame(); await until(() => guest.getRemoteSnapshot().game === null);
+    host.configure({ target: 1, turnMs: null, enabledSpecials: [] });
+    await until(() => !host.getRemoteSnapshot().configuring && guest.getRemoteSnapshot().config.target === 1);
+    host.advanceRound(); await until(() => !!guest.getRemoteSnapshot().game);
+    for (const player of [host, guest]) {
+      const before = player.getSnapshot();
+      player.submit({ playerId: before.localPlayerId!, action: 'quit', round: before.game.round, turnId: before.game.turnId });
+      await until(() => guest.getSnapshot().game.turnId !== before.game.turnId);
+    }
+    assert.equal(guest.getRemoteSnapshot().game!.phase, 'game-over');
+    host.configure({ target: 50, turnMs: null, enabledSpecials: ['war'] });
+    await until(() => !host.getRemoteSnapshot().configuring && guest.getRemoteSnapshot().config.target === 50);
+    host.advanceRound(); await until(() => guest.getRemoteSnapshot().game!.phase === 'playing');
+    assert.equal(guest.getRemoteSnapshot().game!.round, 1);
+    assert.equal(guest.getRemoteSnapshot().joinCode, code);
+    guest.dispose();
+    await until(() => !host.getRemoteSnapshot().members.find(m => m.seatId === seat)!.connected);
+    const restored = client('Guest', 'resume'); await until(() => restored.getRemoteSnapshot().connected);
+    assert.equal(restored.getRemoteSnapshot().seatId, seat);
+    assert.equal(restored.getRemoteSnapshot().game!.config.target, 50);
+    restored.resume(); await until(() => restored.getRemoteSnapshot().connected);
+    assert.equal(restored.getRemoteSnapshot().seatId, seat);
+    host.kick(seat!); await until(() => !restored.getRemoteSnapshot().connected && !saved.get('Guest')!.sessionId);
+    assert.match(restored.getRemoteSnapshot().error!, /removed/);
+    assert.equal(host.getRemoteSnapshot().members.length, 1);
   } finally { remotes.forEach(s => s.dispose()); sockets.forEach(s => s.terminate()); await backend.close(); }
 });

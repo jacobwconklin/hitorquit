@@ -2,6 +2,20 @@
 
 A React Native / Expo card game with offline Solo and online Host/Join modes. Solo uses one human and 2–7 local bots (default 2) and requires no backend. Five card-front sets, eight card backs, and thirteen fonts are bundled.
 
+## Supported platforms and current release
+
+Hit or Quit is supported as a **website** (desktop and mobile browsers, including iPhone/iPad Safari) and a **native iOS app for iPhone and iPad**. Features must work on both platforms. Android tooling remains available but Android store release is not currently a supported release target.
+
+| Setting | Current value |
+| --- | --- |
+| Frontend / App Store version | **1.0.0** |
+| iOS build number | **1** |
+| Bundle identifier | `com.jacobconklin.hitorquit` |
+| Native devices | iPhone and iPad (`supportsTablet: true`) |
+| Release status | Configured in source; not yet archived, uploaded, or published by this setup |
+
+`app.json` owns the native configuration. Keep `expo.version` and `package.json` version synchronized. Backend package versioning is independent. See [the iOS release checklist](#ios-release-checklist) for every release; website deployment is documented in [the deployment guide](../_DEPLOY.md).
+
 ## Run
 
 Use Node.js 22.13 or newer:
@@ -57,7 +71,7 @@ Manual checks: change each category independently, close/reopen and reload to ch
 - `src/session/types.ts`: replaceable session/snapshot interface.
 - `src/session/localSession.ts`, `funLocalSession.ts`: offline authority, injected randomness/clock, bots, decision deadlines, stale-choice protection, and cleanup. Fun UI receives projected snapshots, not internal effect state.
 - `src/session/remoteSession.ts`: WebSocket adapter implementing the same gameplay interface plus lobby/connection state, rule configuration, persistence callbacks, reconnects, and explicit leave. It never computes authoritative game transitions.
-- `src/session/platformStorage.ts`: browser sessionStorage and native AsyncStorage, plus secure UUID generation and backend URL selection.
+- `src/session/platformStorage.ts`: browser localStorage and native AsyncStorage, plus secure UUID generation and backend URL selection.
 - `src/appearance/`: typed catalogs, explicit bundled assets, validated durable preferences, an asynchronous font/selection controller, and the shared React provider. Catalog and controller tests run without loading binary assets.
 - `src/ui/CustomizationPanel.tsx`, `SpecialCardGuide.tsx`: title-screen appearance controls and collapsible card reference. `src/game/specials/guide.ts` combines action definitions with passive-card explanations.
 - `src/ui/`: React Native card/hidden-card rendering, mixed inventory, shared score previews, and `SpecialPanel.tsx` for descriptions and target/card/action choices between the deck and Hit/Quit buttons.
@@ -68,14 +82,58 @@ Original 60 × 90 pixel assets retain their aspect ratio; web uses pixelated ima
 
 ## Multiplayer
 
-Start the backend from `hoq-be` with `npm ci`, `npm test`, and `npm start`. Select **Host**, enter your name, choose the rules, and create a table. Share the six-character code. Others select **Join** and enter it. Only the host can configure rules in the lobby or start the game/next round. Rules are fixed once a game starts. When the host leaves or disconnects, the server randomly selects another connected member as host; returning does not reclaim host authority.
+Start the backend from `hoq-be` with `npm ci`, `npm test`, and `npm start`. Host creates a table and shares its code. Only the host chooses rules and starts games/rounds. Table / Players provides player removal and a confirmation before ending the game for everyone. Host authority survives temporary disconnects; explicitly leaving transfers it to another member.
 
-Late arrivals see a waiting screen with live round information and enter the next round. Disconnected participants are controlled by bots until they reconnect. Other humans are displayed as opponents, and each client sees its own hand by its public seat ID. The shared table sends identical Hit/Quit commands through `GameSession`; Solo uses `createLocalSession`, multiplayer uses `createRemoteSession`. The backend directly imports the same pure engine, rules, and bot policy that Solo uses. Change gameplay in `src/game`, not in the network adapter. A real-server integration test checks solo/multiplayer state parity for the same deck and actions.
+New players must wait until a game ends to join. Disconnected members keep their seat and resume the latest authoritative state. Normal timers still run; unlimited turns wait. Only explicitly departed or kicked seats are replaced by bots for the rest of the round. Completed and ended games return everyone to the menu with card/font customization and editable host rules. Replay keeps the same table code.
 
-The private player ID and backend session ID are stored under `hoq.multiplayer.identity.v1`. Web uses **sessionStorage**, isolated per tab and retained across reloads. iOS/Android use **AsyncStorage**, retained across app restarts. The saved backend URL is retained too. **Rejoin saved table** resumes the same seat; active connections also retry automatically after network loss and sync on app foreground. Explicit Leave clears the saved session ID and retains the player ID. Expired sessions clear the stale session ID. Closing a browser tab normally clears that tab's storage. Solo remains the default and never opens a WebSocket.
+The private player ID, backend session ID, and endpoint are stored under `hoq.multiplayer.identity.v1` in browser **localStorage** or native **AsyncStorage**. The app automatically resumes a saved table on startup and reconnects on foreground/network restoration. Browser tabs share one identity; opening the same table elsewhere replaces the earlier connection. Use separate browser profiles/devices for different players. Explicit Leave clears the saved session. Closing or backgrounding the app preserves it. A table expires after 24 hours with everyone disconnected by default; a backend restart also loses its in-memory sessions.
 
 Development defaults to the local backend: HTTP web uses its current hostname on port 8080, Android emulator uses `ws://10.0.2.2:8080/ws`, and iOS simulator uses `ws://localhost:8080/ws`. HTTPS development uses `wss://<current-host>/ws` and requires a local reverse proxy. Production builds, including `npm run build:web`, default to `wss://hoq.conkgames.com/ws`; nginx forwards that connection to port 8081 on EC2. No environment configuration is needed for these defaults.
 
 `EXPO_PUBLIC_WS_URL` overrides the default in either mode. For physical-device development, set `ws://<computer-LAN-IP>:8080/ws` in `.env.development.local`. Avoid putting a local URL in a shared `.env`, since it would override the production URL during export too. Public Expo environment values are baked into exports; rebuild and redeploy after changing them. New native dependencies require rebuilding an existing development/standalone app.
 
 Validation: frontend rule/session/storage tests, backend adapter integration tests, TypeScript checks, web/iOS/Android bundle exports, and browser checks of host/join, turns, reload/rejoin, host transfer, and solo bot play. Device runtime checks should still be performed on iOS and Android before release.
+
+## iOS release checklist
+
+### One-time Mac and Apple setup
+
+1. Use a Mac with Node.js 22.13+, pnpm, CocoaPods, and an Xcode version compatible with Expo SDK 55 and Apple's current submission requirements. Open Xcode, complete installation, and select its Command Line Tools in Xcode Settings. Windows can edit the shared source and build the website, but cannot run Xcode or create a local signed iOS archive.
+2. Enroll in the Apple Developer Program and sign in under Xcode Settings > Accounts. Register the explicit app identifier `com.jacobconklin.hitorquit` in the correct team, then create the matching iOS app record in App Store Connect. Team/account credentials are selected on the Mac and are not committed to this repository.
+3. Before the first submission, supply a final app icon and configure `expo.icon` (or `expo.ios.icon`) in `app.json`. There is no release icon configured yet. Prepare the store description, support/privacy-policy URLs, privacy answers, age rating, review contact, and required iPhone/iPad screenshots. Answer export-compliance questions according to the actual app and libraries; do not blindly declare an encryption exemption.
+
+### Changes and checks for every release
+
+1. **Choose the version and build.** The first configured release is `1.0.0 (1)`. For each subsequent upload, increment `expo.ios.buildNumber` as a numeric string, including replacement TestFlight builds of the same version. For a new public release, also update `expo.version` and the frontend `package.json` version (for example, `1.0.1` for a fix or `1.1.0` for features). Update the current-release table above. Keep the bundle identifier stable and retain iPhone/iPad support.
+2. **Check production configuration.** Release builds default to `wss://hoq.conkgames.com/ws`. Inspect shell and Expo `.env` overrides so `EXPO_PUBLIC_WS_URL` cannot bake a localhost/LAN URL into the archive. Public Expo environment variables are not secrets. Review changes to native dependencies, permissions, icons, config plugins, deployment targets, and privacy manifests when applicable.
+3. **Install and validate.** From `hoq-fe` on the Mac:
+
+   ```sh
+   pnpm install --frozen-lockfile
+   npm run typecheck
+   npm test
+   npm run build:web
+   ```
+
+   Run `npm test` in `hoq-be` when shared rules or multiplayer code changed. Check website behavior as well as native behavior. Keep the backend compatible with already-installed iOS versions: native updates reach players later than website deployments. Deploy compatible backend changes before clients need them, and account for active sessions being lost on a backend restart.
+4. **Generate/update the native project.** From `hoq-fe`:
+
+   ```sh
+   npm run prebuild:ios
+   open ios/*.xcworkspace
+   ```
+
+   This runs `expo prebuild --platform ios` and installs native dependencies. Open the `.xcworkspace`, not the `.xcodeproj`. The generated `ios/` directory is ignored by Git; app configuration and config plugins are the source of truth. Run prebuild again after version/configuration/native-dependency changes. If a clean regeneration is needed, first preserve any intentional native edits in config/plugins; `npx expo prebuild --platform ios --clean` deletes and recreates the generated iOS project.
+5. **Verify Xcode settings.** Select the app target, choose the correct team under Signing & Capabilities, and enable automatic signing. Verify bundle ID, version, build number, iPhone and iPad device support, and deployment target against the intended release. Use the app scheme with Release configuration for Archive. Resolve signing/assets/privacy-manifest/build errors before uploading.
+6. **Test native devices.** Test on iPhone and iPad, portrait and landscape, including narrow/resized iPad windows where available. Verify safe areas, scrolling, card/font customization and persistence, Solo without network, Host/Join between web and iOS, background/foreground recovery, force-close/reopen recovery, disconnected indicators, host kick/end confirmation, and replay with new rules. Also check a release build without Metro running. Simulator checks supplement physical-device checks.
+7. **Archive and upload.** Select an iOS device or generic iOS device destination (not a simulator), then Product > Archive. In Organizer, validate the archive and use Distribute App > App Store Connect to upload. The release archive bundles JavaScript and assets. Keep the archive and its debug symbols for crash diagnosis.
+8. **TestFlight and App Review.** Wait for processing in App Store Connect, resolve compliance prompts, and test the uploaded build through TestFlight on iPhone/iPad. Complete or update the listing, screenshots, privacy disclosures, review notes, and What's New. Select the intended build for the matching app version, submit for review, and choose the release timing. An upload alone is not publication. Give reviewers instructions for testing Solo and multiplayer; keep the backend available during review.
+9. **Record the result.** Update the release record below with the exact version/build, source commit, date, validation completed, TestFlight/App Store status, and release notes. Mark a release published only after App Store Connect confirms it. Website-only changes do not update an installed native app; native code/assets/JavaScript changes require a new iOS build with the current setup (no OTA update workflow is configured).
+
+### Release record
+
+| Version | iOS build | Status | Notes |
+| --- | --- | --- | --- |
+| 1.0.0 | 1 | Source configuration prepared; not uploaded | Bundle ID `com.jacobconklin.hitorquit`; iPhone and iPad enabled. Native archive, device testing, signing, release icon and store metadata still required on Mac/Apple accounts. |
+
+References: [Expo app configuration](https://docs.expo.dev/versions/latest/config/app/), [version and build numbers](https://docs.expo.dev/build-reference/app-versions/), [Xcode submission workflow](https://docs.expo.dev/submit/ios-manual/), [Apple build upload requirements](https://developer.apple.com/help/app-store-connect/manage-builds/upload-builds/).

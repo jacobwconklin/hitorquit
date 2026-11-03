@@ -134,19 +134,18 @@ test('Chicken keeps the first commitment secret from the second chooser and spec
     request(registry, a, 'player.action', choice(session, 'quit'));
     assert.equal(session.game!.special!.pending!.job.data.choices[aSeat], 'quit');
     assert.equal(session.game!.special!.pending!.actorId, bSeat);
-    const spectator = new Client();
-    request(registry, spectator, 'session.join', { playerId: spectator.id, name: 'Spectator', joinCode: session.joinCode });
-    for (const client of [a, b, spectator]) {
+    const spectatorState = registry.snapshot(session);
+    assert.deepEqual(spectatorState.game!.special!.pending!.options, []);
+    for (const client of [a, b]) {
       const pending = client.state().game.special.pending;
       assert.deepEqual(pending.job.data, {});
       assert.ok(!JSON.stringify(pending).includes('"choices"'));
     }
-    assert.equal(spectator.state().game.special.pending.options.length, 0);
     assert.equal(b.state().game.special.pending.options.length, 2);
   } finally { registry.dispose(); }
 });
 
-test('disconnect schedules the pending decision actor as bot and reconnect preserves its deadline', async () => {
+test('disconnect preserves the pending choice and deadline; explicit departure schedules a bot', async () => {
   let now = 0;
   const { registry, session, a, b, bSeat } = setup('ransom', { botMs: 20, now: () => now }, true);
   try {
@@ -154,7 +153,7 @@ test('disconnect schedules the pending decision actor as bot and reconnect prese
     request(registry, a, 'player.action', choice(session, 'b-secret-card'));
     const deadline = session.deadline, pendingId = session.game!.special!.pending!.id;
     now = 5000; registry.disconnect(b);
-    assert.equal(session.game!.players[1].controller, 'bot');
+    assert.equal(session.game!.players[1].controller, 'human');
     assert.equal(session.game!.players[0].controller, 'human');
     assert.equal(session.deadline, deadline);
     const restored = new Client();
@@ -163,7 +162,7 @@ test('disconnect schedules the pending decision actor as bot and reconnect prese
     await new Promise(resolve => setTimeout(resolve, 45));
     assert.equal(session.game!.special!.pending!.id, pendingId);
     assert.equal(session.game!.players[1].controller, 'human');
-    registry.disconnect(restored);
+    request(registry, restored, 'session.leave');
     await until(() => session.game!.special!.pending?.id !== pendingId);
     assert.ok(session.game!.turnId > 1);
   } finally { registry.dispose(); }

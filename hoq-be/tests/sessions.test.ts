@@ -31,14 +31,14 @@ test('capacity is configurable; reconnect works when full and old socket close i
     assert.ok(!publicJson.includes(a.id)); assert.ok(!publicJson.includes(b.id));
   } finally { registry.dispose(); }
 });
-test('late joins wait; actions are validated and deduplicated; next round admits new players', () => {
+test('late joins are rejected throughout a match; actions are validated and deduplicated', () => {
   const { registry, a, b, session } = setup();
   try {
     request(registry, a, 'round.start');
-    const c = new Client(); request(registry, c, 'session.join', { playerId: c.id, name: 'C', joinCode: session.joinCode });
+    const c = new Client(); assert.throws(() => request(registry, c, 'session.join', { playerId: c.id, name: 'C', joinCode: session.joinCode }), /game has started/);
     assert.equal(session.game!.players.length, 2);
     const action = { action: 'quit', round: 1, turnId: session.game!.turnId };
-    assert.throws(() => request(registry, c, 'player.action', action), (error: unknown) => error instanceof RequestError && error.code === 'NOT_YOUR_TURN');
+    assert.throws(() => request(registry, c, 'player.action', action), (error: unknown) => error instanceof RequestError && error.code === 'NOT_JOINED');
     const id = request(registry, a, 'player.action', action);
     const revision = session.revision;
     request(registry, a, 'player.action', action, id); assert.equal(session.revision, revision);
@@ -46,11 +46,11 @@ test('late joins wait; actions are validated and deduplicated; next round admits
     request(registry, b, 'player.action', { action: 'quit', round: 1, turnId: session.game!.turnId });
     assert.equal(session.game!.phase, 'round-over');
     request(registry, a, 'round.start');
-    assert.equal(session.game!.players.length, 3); assert.equal(session.game!.round, 2);
-    assert.equal(session.game!.players[2].total, 0);
+    assert.equal(session.game!.players.length, 2); assert.equal(session.game!.round, 2);
+    assert.throws(() => request(registry, c, 'session.join', { playerId: c.id, name: 'C', joinCode: session.joinCode }), /game has started/);
   } finally { registry.dispose(); }
 });
-test('disconnect substitutes a bot, transfers host, and reconnect cancels pending bot work', async () => {
+test('disconnect preserves host and hand, and reconnect restores the same seat', async () => {
   const { registry, a, b, session } = setup({ botMs: 15 });
   try {
     request(registry, a, 'round.start');
@@ -58,12 +58,12 @@ test('disconnect substitutes a bot, transfers host, and reconnect cancels pendin
     const normalIndex = session.game!.deck.findIndex(card => card.kind === 'standard');
     session.game!.deck.unshift(session.game!.deck.splice(normalIndex, 1)[0]);
     registry.disconnect(a);
-    assert.equal(session.host, b.id); assert.equal(session.game!.players[0].controller, 'bot');
+    assert.equal(session.host, a.id); assert.equal(session.game!.players[0].controller, 'human');
     const c = new Client(); request(registry, c, 'session.resume', { playerId: a.id, sessionId: session.id });
     await new Promise(resolve => setTimeout(resolve, 40));
     assert.equal(session.game!.turnId, 1); assert.equal(session.game!.players[0].controller, 'human');
     registry.disconnect(c); await new Promise(resolve => setTimeout(resolve, 40));
-    assert.ok(session.game!.turnId > 1);
+    assert.equal(session.game!.turnId, 1);
   } finally { registry.dispose(); }
 });
 test('join code collisions retry, sessions are isolated, and idle expiration releases codes', () => {
@@ -78,12 +78,12 @@ test('join code collisions retry, sessions are isolated, and idle expiration rel
     assert.equal(registry.sessionsById.has(other.id), true);
   } finally { registry.dispose(); }
 });
-test('expired disconnected seats remain during the round and are removed at its boundary', () => {
+test('disconnected seats survive timeout and round boundaries', () => {
   let now = 0; const { registry, a, b, session } = setup({ reconnectMs: 10, now: () => now });
   try {
     request(registry, a, 'round.start'); request(registry, a, 'player.action', { action: 'quit', round: 1, turnId: 1 });
     registry.disconnect(a); now = 11; registry.sweep(); assert.equal(session.members.size, 2);
-    request(registry, b, 'player.action', { action: 'quit', round: 1, turnId: 2 }); assert.equal(session.members.size, 1);
+    request(registry, b, 'player.action', { action: 'quit', round: 1, turnId: 2 }); assert.equal(session.members.size, 2);
     assert.equal(session.game!.history.length, 1);
   } finally { registry.dispose(); }
 });
@@ -91,7 +91,7 @@ test('explicit departure cannot reclaim an ongoing seat; malformed requests fail
   const { registry, a, session } = setup();
   try {
     request(registry, a, 'round.start'); request(registry, a, 'session.leave');
-    assert.throws(() => request(registry, new Client(), 'session.resume', { playerId: a.id, sessionId: session.id }), /explicitly left/);
+    assert.throws(() => request(registry, new Client(), 'session.resume', { playerId: a.id, sessionId: session.id }), /membership.*ended/);
     assert.throws(() => parseRequest({ type: 'player.action', requestId: 'x', payload: { action: 'hack' } }));
     assert.throws(() => parseRequest({ type: 'session.create', requestId: 'x', payload: { playerId: 'guessable', name: 'A' } }));
   } finally { registry.dispose(); }
@@ -147,5 +147,65 @@ test('host permission, request ID reuse, new game, and sorted public inventory',
     request(registry, a, 'round.start');
     assert.equal(session.game!.phase, 'playing'); assert.equal(session.game!.history.length, 0);
     assert.ok(session.game!.players.every(p => p.total === 0));
+  } finally { registry.dispose(); }
+});
+
+test('host can end, reconfigure and replay with the same code and members', () => {
+  const { registry, a, b, session } = setup();
+  try {
+    const code = session.joinCode;
+    const seats = [...session.members.values()].map(m => m.seatId);
+    request(registry, a, 'round.start');
+    assert.throws(() => request(registry, b, 'game.end'), /Only the host/);
+    assert.throws(() => request(registry, b, 'session.kick', { seatId: seats[0] }), /Only the host/);
+    request(registry, a, 'game.end');
+    assert.equal(session.game, null); assert.equal(session.timers.length, 0);
+    assert.equal((b.messages.at(-1) as any).game, null);
+    request(registry, a, 'session.configure', { config: { target: 50, turnMs: 30000, enabledSpecials: [] } });
+    request(registry, a, 'round.start');
+    assert.equal(session.joinCode, code);
+    assert.deepEqual(session.game!.players.map(p => p.id), seats);
+    assert.equal(session.game!.config.target, 50);
+    assert.equal(session.game!.config.turnMs, 30000);
+    assert.equal(session.game!.round, 1);
+    assert.ok(session.game!.players.every(p => p.total === 0));
+  } finally { registry.dispose(); }
+});
+
+test('host removes connected and disconnected players before and during games', () => {
+  const { registry, a, b, session } = setup();
+  try {
+    const bSeat = session.members.get(b.id)!.seatId;
+    assert.throws(() => request(registry, a, 'session.kick', { seatId: session.members.get(a.id)!.seatId }), /another player/);
+    request(registry, a, 'session.kick', { seatId: bSeat });
+    assert.equal(b.closed, true);
+    assert.equal(registry.snapshot(session).members.length, 1);
+    assert.equal(b.messages.at(-1).code, 'MEMBERSHIP_ENDED');
+    const c = new Client(); request(registry, c, 'session.join', { playerId: c.id, name: 'C', joinCode: session.joinCode });
+    request(registry, a, 'round.start');
+    registry.disconnect(c);
+    request(registry, a, 'session.kick', { seatId: session.members.get(c.id)!.seatId });
+    assert.equal(registry.snapshot(session).members.length, 1);
+    assert.equal(session.game!.players[1].controller, 'bot');
+    assert.throws(() => request(registry, new Client(), 'session.resume', { playerId: c.id, sessionId: session.id }), /membership.*ended/);
+    request(registry, a, 'game.end');
+    assert.equal(session.members.size, 1);
+  } finally { registry.dispose(); }
+});
+
+test('temporary absence retains seat, score and host across long disconnects', () => {
+  let now = 0;
+  const { registry, a, b, session } = setup({ now: () => now, reconnectMs: 10 });
+  try {
+    request(registry, a, 'round.start');
+    request(registry, a, 'player.action', { action: 'quit', round: 1, turnId: 1 });
+    registry.disconnect(a);
+    now = 600000; registry.sweep();
+    request(registry, b, 'player.action', { action: 'quit', round: 1, turnId: 2 });
+    const before = session.game;
+    const restored = new Client(); request(registry, restored, 'session.resume', { playerId: a.id, sessionId: session.id });
+    assert.equal(session.host, a.id);
+    assert.deepEqual(session.game, before);
+    assert.equal(restored.messages[1].game.phase, 'round-over');
   } finally { registry.dispose(); }
 });

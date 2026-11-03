@@ -23,7 +23,7 @@ export class Sessions {
   private bindings = new Map<Peer, { session: Session; member: Member }>();
   readonly options: Options;
   constructor(options: Partial<Options> = {}) {
-    this.options = { maxPlayers: 8, reconnectMs: 120000, idleMs: 300000, botMs: 1100, now: Date.now,
+    this.options = { maxPlayers: 8, reconnectMs: 120000, idleMs: 86400000, botMs: 1100, now: Date.now,
       code: () => Array.from({ length: 6 }, () => alphabet[randomInt(alphabet.length)]).join(''), ...options };
     if (!Number.isSafeInteger(this.options.maxPlayers) || this.options.maxPlayers < 2) throw new Error('maxPlayers must be at least 2.');
     for (const key of ['reconnectMs', 'idleMs', 'botMs'] as const) {
@@ -51,10 +51,11 @@ export class Sessions {
       }
       this.prune(session);
       let member = session.members.get(p.playerId);
-      if (member?.departed) fail('MEMBERSHIP_ENDED', 'This player explicitly left the session.');
+      if (member?.departed) fail('MEMBERSHIP_ENDED', 'Your membership in this table has ended.');
       if (!member) {
         if (request.type === 'session.resume') fail('MEMBER_NOT_FOUND', 'Membership expired; join using the code.');
-        if (session.members.size >= this.options.maxPlayers) fail('SESSION_FULL', 'The session is full.');
+        if (session.game && session.game.phase !== 'game-over') fail('GAME_ACTIVE', 'This game has started. Join after it ends.');
+        if ([...session.members.values()].filter(m => !m.departed).length >= this.options.maxPlayers) fail('SESSION_FULL', 'The session is full.');
         member = { playerId: p.playerId, seatId: randomUUID(), name: request.payload.name, departed: false, requests: new Map() };
         session.members.set(member.playerId, member);
       }
@@ -78,6 +79,27 @@ export class Sessions {
       peer.send(this.snapshot(session, [], member.seatId)); return;
     }
     switch (request.type) {
+      case 'game.end':
+        if (session.host !== member.playerId) fail('NOT_HOST', 'Only the host can end the game.');
+        session.game = null;
+        this.prune(session); this.schedule(session, false);
+        this.changed(session, [{ type: 'round-start', message: 'The host ended the game. Choose rules for the next game.' }]);
+        break;
+      case 'session.kick': {
+        if (session.host !== member.playerId) fail('NOT_HOST', 'Only the host can remove players.');
+        const target = [...session.members.values()].find(m => m.seatId === request.payload.seatId && !m.departed);
+        if (!target || target === member) fail('INVALID_MEMBER', 'Choose another player to remove.');
+        const targetPeer = target.peer;
+        if (targetPeer) {
+          targetPeer.send({ type: 'request.error', code: 'MEMBERSHIP_ENDED', message: 'The host removed you from the table.' });
+          this.disconnect(targetPeer, true);
+          targetPeer.close();
+        } else {
+          target.departed = true; this.controller(session, target, 'bot');
+          this.schedule(session, false); this.changed(session);
+        }
+        break;
+      }
       case 'session.configure':
         if (session.host !== member.playerId) fail('NOT_HOST', 'Only the host can set the rules.');
         if (session.game && session.game.phase !== 'game-over') fail('GAME_ACTIVE', 'Rules can only change before a game.');
@@ -88,7 +110,7 @@ export class Sessions {
         if (session.host !== member.playerId) fail('NOT_HOST', 'Only the host can start a round.');
         if (session.game?.phase === 'playing') fail('ROUND_ACTIVE', 'A round is already in progress.');
         this.prune(session);
-        const seats = [...session.members.values()].filter(m => !m.departed).map(m => ({ id: m.seatId, name: m.name, controller: m.peer ? 'human' as const : 'bot' as const }));
+        const seats = [...session.members.values()].filter(m => !m.departed).map(m => ({ id: m.seatId, name: m.name, controller: 'human' as const }));
         if (seats.length < 2) fail('NOT_ENOUGH_PLAYERS', 'At least two players are required.');
         const deck = shuffle(funRules.createDeck(session.config));
         if (seats.length > deck.filter(c => c.kind === 'standard').length) fail('DECK_CAPACITY', 'Not enough normal cards for opening hands.');
@@ -125,7 +147,7 @@ export class Sessions {
     const game = session.game ? projectGame(session.game, viewerId) : null;
     return { type: 'session.state', sessionId: session.id, joinCode: session.joinCode, config: session.config, revision: session.revision, maxPlayers: this.options.maxPlayers,
       hostSeatId: session.members.get(session.host ?? '')?.seatId ?? null,
-      members: [...session.members.values()].map(m => ({ seatId: m.seatId, name: m.name, connected: !!m.peer,
+      members: [...session.members.values()].filter(m => !m.departed).map(m => ({ seatId: m.seatId, name: m.name, connected: !!m.peer,
         waiting: !!game && !game.players.some(p => p.id === m.seatId), departed: m.departed })),
       game, deadline: session.deadline, events: session.game ? projectEvents(events, session.game, viewerId) : events };
   }
@@ -140,9 +162,9 @@ export class Sessions {
     const { session, member } = binding;
     if (member.peer !== peer) return;
     member.peer = undefined; member.disconnectedAt = this.options.now(); member.departed = departed;
-    this.controller(session, member, 'bot');
-    if (session.host === member.playerId) {
-      const candidates = [...session.members.values()].filter(m => m.peer);
+    if (departed) this.controller(session, member, 'bot');
+    if (departed && session.host === member.playerId) {
+      const candidates = [...session.members.values()].filter(m => !m.departed);
       session.host = candidates.length ? candidates[randomInt(candidates.length)].playerId : undefined;
     }
     if (![...session.members.values()].some(m => m.peer)) session.emptySince ??= this.options.now();
@@ -151,7 +173,9 @@ export class Sessions {
   private prune(session: Session) {
     for (const [id, member] of session.members) {
       const active = session.game?.phase === 'playing' && session.game.players.some(p => p.id === member.seatId);
-      if (!member.peer && !active && (member.departed || (member.disconnectedAt !== undefined && this.options.now() - member.disconnectedAt >= this.options.reconnectMs))) session.members.delete(id);
+      // Temporary disconnects retain membership for the lifetime of the table.
+      // Departed seats remain until the round ends so special-card references stay valid.
+      if (!member.peer && !active && member.departed) session.members.delete(id);
     }
   }
   private act(session: Session, command: Command) {

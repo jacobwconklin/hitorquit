@@ -4,8 +4,8 @@ import { randomUUID } from 'expo-crypto';
 import { createIdentityStore } from './identityStore';
 
 export const identityStore = createIdentityStore(Platform.OS === 'web' ? {
-  async getItem(key) { return window.sessionStorage.getItem(key); },
-  async setItem(key, value) { window.sessionStorage.setItem(key, value); },
+  async getItem(key) { return window.localStorage.getItem(key) ?? window.sessionStorage.getItem(key); },
+  async setItem(key, value) { window.localStorage.setItem(key, value); window.sessionStorage.removeItem(key); },
 } : AsyncStorage, randomUUID);
 
 export function backendUrl() {

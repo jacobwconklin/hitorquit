@@ -28,7 +28,7 @@ function BonusToast({ messages, onDismiss }: { messages: string[]; onDismiss(): 
   </Animated.View>;
 }
 
-export function GameTable({ session, onLeave }: { session: GameSession; onLeave(): void }) {
+export function GameTable({ session, onLeave, tableControls }: { session: GameSession; onLeave(): void; tableControls?: React.ReactNode }) {
   const { game, deadline, events, localPlayerId, multiplayer } = useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot);
   const [now, setNow] = useState(Date.now());
   const [panel, setPanel] = useState<string | null>(null);
@@ -77,13 +77,15 @@ export function GameTable({ session, onLeave }: { session: GameSession; onLeave(
     return () => clearInterval(timer);
   }, [deadline]);
   useEffect(() => {
+    if (multiplayer) return;
     const subscription = AppState.addEventListener('change', state => { if (state === 'active') session.resume(); });
     return () => subscription.remove();
   }, [session]);
   const inspected = game.players.find(p => p.id === panel);
   const finished = game.phase !== 'playing';
   return <View style={s.table}>
-    {multiplayer && <View style={{ padding: 10, gap: 6 }}><Label selectable>CODE: {multiplayer.joinCode} · {multiplayer.isHost ? 'YOU ARE HOST' : 'MULTIPLAYER'}{!multiplayer.connected ? ' · RECONNECTING' : ''}</Label>{multiplayer.error && <Label accessibilityLiveRegion="polite" style={{ color: colors.coral }}>{multiplayer.error}</Label>}</View>}
+    {multiplayer && <View style={{ padding: 10, gap: 6 }}><Label selectable>CODE: {multiplayer.joinCode} · {multiplayer.isHost ? 'YOU ARE HOST' : 'MULTIPLAYER'}{!multiplayer.connected ? ' · RECONNECTING' : ''}</Label>{!!multiplayer.disconnectedNames?.length && <Label>Disconnected: {multiplayer.disconnectedNames.join(', ')}</Label>}{multiplayer.error && <Label accessibilityLiveRegion="polite" style={{ color: colors.coral }}>{multiplayer.error}</Label>}</View>}
+    {tableControls && <Button label="TABLE / PLAYERS" small onPress={() => setPanel('manage')} />}
     <ScrollView ref={tableScroll} style={s.tableScroll} contentContainerStyle={s.tableContent}
       onLayout={event => { initialScroll.current.viewport = event.nativeEvent.layout.height; scrollToStartingHand(); }}
       onContentSizeChange={(_, contentHeight) => { initialScroll.current.content = contentHeight; scrollToStartingHand(); }}>
@@ -127,7 +129,7 @@ export function GameTable({ session, onLeave }: { session: GameSession; onLeave(
     {(panel !== null || finished) && <Modal visible transparent animationType="fade" onRequestClose={() => setPanel(null)}>
       <View style={s.scrim}><View style={[s.panel, { width: panel === 'scores' ? 1000 : 620, maxHeight: height - 28, maxWidth: width - 28 }]}>
         <ScrollView contentContainerStyle={s.panelContent}>
-          {panel === 'leave' ? <><Label style={s.panelTitle}>Leave the table?</Label><Label style={s.panelText}>{multiplayer ? 'A bot will finish your current round.' : 'This local match will be lost.'}</Label><Button label="KEEP PLAYING" onPress={() => setPanel(null)} tone="lime" /><Button label="LEAVE MATCH" onPress={onLeave} tone="coral" /></>
+          {panel === 'manage' ? <>{tableControls}<Button label="BACK TO GAME" onPress={() => setPanel(null)} /></> : panel === 'leave' ? <><Label style={s.panelTitle}>Leave the table?</Label><Label style={s.panelText}>{multiplayer ? 'A bot will finish your current round.' : 'This local match will be lost.'}</Label><Button label="KEEP PLAYING" onPress={() => setPanel(null)} tone="lime" /><Button label="LEAVE MATCH" onPress={onLeave} tone="coral" /></>
           : inspected ? <><Label style={s.panelTitle}>{inspected.name}'s hand</Label><Hand cards={inspected.hand} width={compact ? 48 : 66} /><Label style={s.panelText}>{hidden ? 'Points hidden' : inspected.status === 'bust' ? 'Busted · 0 points' : `${scoreCards(inspected.hand).total} points in hand`}</Label><Button label="BACK TO TABLE" onPress={() => setPanel(null)} /></>
           : !hidden && (panel === 'scores' || panel === 'deck') ? <>
             <View style={s.panelTop}><Label style={s.panelTitle}>{panel === 'scores' ? 'Scoreboard' : 'The remaining deck'}</Label><Button label={panel === 'scores' ? 'DECK →' : '← SCORES'} small onPress={() => setPanel(panel === 'scores' ? 'deck' : 'scores')} /></View>
@@ -140,6 +142,7 @@ export function GameTable({ session, onLeave }: { session: GameSession; onLeave(
             {game.players.map(p => <View key={p.id} style={s.resultRow}><Label>{p.name}</Label><Label style={{ color: p.status === 'bust' ? colors.coral : colors.lime }}>{p.status === 'bust' ? 'BUST' : `+${p.roundScore}`}</Label><Label>{p.total} TOTAL</Label></View>)}
             {(!multiplayer || multiplayer.isHost) ? <Button label={game.phase === 'game-over' ? 'PLAY AGAIN' : 'NEXT ROUND →'} disabled={!!multiplayer && !multiplayer.connected} tone="lime" onPress={() => { if (game.phase === 'game-over' && !multiplayer) onLeave(); else session.advanceRound(); }} /> : <Label style={s.panelText}>Waiting for the host to start the next round.</Label>}
             {multiplayer && <><Label style={s.panelText}>{multiplayer.error ?? (!multiplayer.connected ? 'Reconnecting…' : '')}</Label><Button label="LEAVE TABLE" small onPress={onLeave} /></>}
+            {tableControls && <Button label="TABLE / PLAYERS" onPress={() => setPanel('manage')} />}
             <Button label="VIEW SCOREBOARD" small onPress={() => setPanel('scores')} />
           </> : null}
         </ScrollView>

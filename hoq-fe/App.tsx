@@ -46,7 +46,7 @@ function Home() {
   const [onlineError, setOnlineError] = useState('');
   useEffect(() => {
     let mounted = true;
-    void identityStore.load().then(value => { if (mounted) setSaved(value); }).catch(() => { if (mounted) setOnlineError('Session storage is unavailable. Solo play is still available.'); });
+    void identityStore.load().then(value => { if (mounted) { setSaved(value); if (value.sessionId) void online(true); } }).catch(() => { if (mounted) setOnlineError('Session storage is unavailable. Solo play is still available.'); });
     return () => { mounted = false; remoteRef.current?.dispose(); };
   }, []);
   async function online(resume = false) {

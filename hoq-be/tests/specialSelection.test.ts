@@ -30,7 +30,7 @@ test('protocol accepts absent, all, none, and subsets; rejects malformed selecti
   }
 });
 
-test('host choices broadcast, remain locked during a match, refill correctly, survive rounds and host transfer, and can change for a new game', () => {
+test('host choices broadcast, remain locked during a match, refill correctly, survive rounds and host reconnect, and can change for a new game', () => {
   const registry = new Sessions(); const host = new Client(), guest = new Client();
   const enabled: SpecialCardId[] = ['blank-hearts', 'rainbow-ace'];
   try {
@@ -60,20 +60,21 @@ test('host choices broadcast, remain locked during a match, refill correctly, su
     }
     assert.throws(() => request(registry, host, 'session.configure', { config: config([]) }), /before a game/);
     registry.disconnect(host);
-    assert.equal(session.host, guest.id);
+    assert.equal(session.host, host.id);
     const restored = new Client();
     request(registry, restored, 'session.resume', { playerId: host.id, sessionId: session.id });
     assert.deepEqual(restored.state().config.enabledSpecials, enabled);
-    request(registry, guest, 'round.start');
+    request(registry, restored, 'round.start');
     assert.equal(session.game!.round, 2);
     assert.deepEqual(specials(session.game!.deck), [...enabled].sort());
+    session.game!.phase = 'game-over';
     const late = new Client();
     request(registry, late, 'session.join', { playerId: late.id, name: 'Late', joinCode: session.joinCode });
     assert.deepEqual(late.state().config.enabledSpecials, enabled);
     session.game!.phase = 'game-over';
-    request(registry, guest, 'session.configure', { config: config([]) });
+    request(registry, restored, 'session.configure', { config: config([]) });
     assert.deepEqual(session.game!.config.enabledSpecials, enabled, 'new settings must not mutate the completed game');
-    request(registry, guest, 'round.start');
+    request(registry, restored, 'round.start');
     assert.equal(session.game!.deck.length + session.game!.players.length, 52);
     assert.deepEqual(specials(session.game!.deck), []);
   } finally { registry.dispose(); }

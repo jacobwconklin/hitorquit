@@ -1,8 +1,9 @@
 {
   "expo": {
-    "name": "Hit or Quit", "slug": "hit-or-quit", "version": "0.1.0",
+    "name": "Hit or Quit", "slug": "hit-or-quit", "version": "1.0.0",
     "orientation": "default", "userInterfaceStyle": "dark",
     "web": { "bundler": "metro", "name": "Hit or Quit", "themeColor": "#102724" },
+    "ios": { "bundleIdentifier": "com.jacobconklin.hitorquit", "buildNumber": "1", "supportsTablet": true },
     "plugins": ["expo-font"],
     "experiments": {
       "baseUrl": "/hitorquit"

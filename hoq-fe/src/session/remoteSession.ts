@@ -16,6 +16,8 @@ export interface RemoteState {
 export interface RemoteSession extends GameSession {
   getRemoteSnapshot(): RemoteState;
   configure(config: Config): void;
+  kick(seatId: string): void;
+  endGame(): void;
   leave(): Promise<void>;
 }
 export function createRemoteSession(options: {
@@ -39,7 +41,7 @@ export function createRemoteSession(options: {
   function update(patch: Partial<RemoteState>) {
     state = { ...state, ...patch };
     if (state.game) snapshot = { game: state.game, deadline: state.deadline, events: state.events, localPlayerId: state.seatId,
-      multiplayer: { isHost: state.seatId === state.hostSeatId, connected: state.connected, joinCode: state.joinCode, error: state.error } };
+      multiplayer: { isHost: state.seatId === state.hostSeatId, connected: state.connected, joinCode: state.joinCode, disconnectedNames: state.members.filter(m => !m.connected).map(m => m.name), error: state.error } };
     listeners.forEach(fn => fn());
   }
   function persist(value: Identity) {
@@ -106,13 +108,20 @@ export function createRemoteSession(options: {
     subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     submit(command) { if (state.connected && state.game && command.playerId === state.seatId) send('player.action', { action: command.action, round: command.round ?? state.game.round, turnId: command.turnId, choiceId: command.choiceId, optionId: command.optionId }); },
     advanceRound() { if (state.connected && !state.configuring && state.hostSeatId === state.seatId) send('round.start'); },
+    kick(seatId) { if (state.connected && state.hostSeatId === state.seatId) send('session.kick', { seatId }); },
+    endGame() { if (state.connected && state.hostSeatId === state.seatId) send('game.end'); },
     configure(config) {
       if (state.connected && !state.configuring && state.hostSeatId === state.seatId && (!state.game || state.game.phase === 'game-over')) {
         configRequest = send('session.configure', { config });
         if (configRequest) update({ configuring: true });
       }
     },
-    resume() { if (state.connected) send('session.sync'); else if (!terminal) { socket?.close(); connect(); } },
+    resume() {
+      if (disposed || terminal) return;
+      // A suspended browser can report OPEN on a dead connection. Resume with a fresh socket.
+      const previous = socket; socket = undefined;
+      previous?.close(); update({ connected: false }); connect();
+    },
     async leave() {
       terminal = true;
       if (state.connected) await new Promise<void>(resolve => {

@@ -62,7 +62,7 @@ function positiveEnv(name: string, fallback: number) {
 if (require.main === module) {
   const port = positiveEnv('PORT', 8080);
   if (port > 65535) throw new Error('PORT must be at most 65535.');
-  const backend = createBackend({ maxPlayers: positiveEnv('MAX_PLAYERS', 8), reconnectMs: positiveEnv('RECONNECT_MS', 120000), idleMs: positiveEnv('IDLE_MS', 300000), heartbeatMs: positiveEnv('HEARTBEAT_MS', 30000) });
+  const backend = createBackend({ maxPlayers: positiveEnv('MAX_PLAYERS', 8), reconnectMs: positiveEnv('RECONNECT_MS', 120000), idleMs: positiveEnv('IDLE_MS', 86400000), heartbeatMs: positiveEnv('HEARTBEAT_MS', 30000) });
   backend.server.listen(port, process.env.HOST ?? '0.0.0.0', () => console.log(`Hit or Quit backend listening on port ${port}`));
   const shutdown = () => { void backend.close(); };
   process.once('SIGTERM', shutdown); process.once('SIGINT', shutdown);

@@ -11,7 +11,7 @@ npm start
 
 The server listens on port 8080 by default. `GET /health` returns `{"status":"ok"}` and WebSocket clients connect to `ws://localhost:8080/ws`. `npm run dev` builds and starts once; it is not a file watcher.
 
-Environment variables are listed in `.env.example`. Set them in the process environment, or load a copied `.env` explicitly with `node --env-file=.env dist/hoq-be/src/server.js`. Defaults are eight members, two minutes of reconnect retention, five minutes with no connected humans before session deletion, and 30-second heartbeats. The cleanup sweep runs every second. `MAX_PLAYERS` is a server setting, never client controlled.
+Environment variables are listed in `.env.example`. Set them in the process environment, or load a copied `.env` explicitly with `node --env-file=.env dist/hoq-be/src/server.js`. Defaults are eight members, 24 hours with no connected humans before session deletion, and 30-second heartbeats. Disconnected membership lasts for the lifetime of the table; RECONNECT_MS is retained for configuration compatibility but no longer expires seats. The cleanup sweep runs every second. `MAX_PLAYERS` is a server setting, never client controlled.
 
 ## Protocol
 
@@ -30,6 +30,8 @@ Creation returns `session.joined` with the request ID, private player ID, public
 | `session.configure` | `config` (`target`, `turnMs`, optional `enabledSpecials`) | Host changes rules in the lobby or after game-over. |
 | `round.start` | `{}` | Host starts the first/next round, or a fresh game after game-over. Requires two members. |
 | `player.action` | `action`, `round`, `turnId`, plus `choiceId` and `optionId` for `choose` | Submit `hit`/`quit`, or the pending decision actor's `choose`. Socket supplies acting identity. |
+| `game.end` | `{}` | Host ends the game for everyone and returns the table to the lobby. |
+| `session.kick` | `{ seatId }` | Host removes another connected or disconnected player at any time. |
 | `session.sync` | `{}` | Request the latest snapshot. |
 | `session.leave` | `{}` | Give up membership; a bot completes an ongoing round. |
 
@@ -47,13 +49,15 @@ The last 128 accepted request IDs are retained per member. Retry the same reques
 
 ## Session lifecycle
 
-The host is the creator. Host control transfers to the random connected member on disconnect. If everyone disconnects, the next member to return becomes host. There is no automatic round start.
+The creator is host and retains authority through temporary disconnects. Explicitly leaving transfers host control to another remaining member. There is no automatic round start.
 
-New members arriving during play wait until the host starts the next round. They receive snapshots, count toward capacity, and start with zero cumulative score. Round participants are fixed until the round ends. Waiting players at game-over enter the next game.
+New players cannot join between the first deal and game-over, including between rounds. Existing members can resume at any point. Completed games show results in the lobby; the host can change rules and replay using the same code and membership. Ending early clears the match and its timers for everyone, also returning to the lobby.
 
-A disconnected participant keeps their seat, cards, scores, and status under bot control. Returning with the same private player ID restores human control without undoing completed bot moves or resetting the deadline. Expired reservations are removed outside an active round; active participants remain through the boundary. Departed participants cannot reclaim their ongoing seat. Replacement bots do not add members. Explicitly left or expired members can join again as new members once their prior seat is removed.
+Disconnected participants retain their seats, cards, scores, and pending choices. Normal turn deadlines continue; unlimited turns wait for the player to return (or the host to remove them or end the game). Resuming returns a current server snapshot without extending deadlines. Disconnected players are never pruned while the table exists.
 
-All-human disconnect time is tracked independently of bot activity. After the idle timeout, the server removes the session and releases its code. Restarting or stopping the server loses all sessions. Sessions are independent but live in one process.
+Explicit departure or a host kick releases membership. A bot finishes the departed seat's current round to keep special-card references valid, then the seat is removed. A new membership can join after the match ends.
+
+After 24 hours with everyone disconnected (configurable via IDLE_MS), the server removes the session and releases its code. Restarting or stopping the server also loses all sessions, which currently live in one process's memory.
 
 ## Rules and deployment
 
